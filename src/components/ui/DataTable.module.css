@@ -1,0 +1,73 @@
+.container {
+  background: var(--color-surface);
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-5);
+}
+
+.scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scroll:focus-visible {
+  outline: var(--focus-ring);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-md);
+}
+
+.table th {
+  height: 48px;
+  padding: 0 var(--space-5);
+  background: var(--color-selected);
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table td {
+  height: 48px;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  vertical-align: middle;
+}
+
+.table tbody tr:hover td {
+  background: var(--color-layer-hover);
+  color: var(--color-text-primary);
+}
+
+.end {
+  text-align: right !important;
+}
+
+.message {
+  text-align: center;
+  padding: var(--space-7) var(--space-5) !important;
+  color: var(--color-text-secondary);
+}
+
+.stale {
+  opacity: 0.6;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}

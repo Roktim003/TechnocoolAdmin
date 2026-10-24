@@ -1,0 +1,1418 @@
+// StockBook — Module 0: identity (auth, users, roles), audit, idempotency.
+// Module 1: product catalog (catalogs, categories, units, products, photos).
+// Module 2: inventory (masters, stock entries, posting ledger, balances, serials, attachments).
+// Module 3: opening import, stock counts, notifications, low-stock alerts.
+// Module 4: purchasing (suppliers, purchase orders, revisions; GRNs link to PO lines).
+// Module 5: projects (costs, status history). Module 6: reporting (scheduled report emails).
+// All ids are UUIDs; timestamps are stored in UTC (displayed as Asia/Dhaka).
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+/// Module keys of the RBAC model. New modules are added here in later prompts.
+enum ModuleKey {
+  dashboard
+  catalog
+  inventory
+  purchasing
+  projects
+  reports
+  users
+}
+
+/// Ordered: NONE < VIEW < CREATE < APPROVE < FULL
+enum PermissionLevel {
+  NONE
+  VIEW
+  CREATE
+  APPROVE
+  FULL
+}
+
+enum LoginResult {
+  SUCCESS
+  WRONG_PASSWORD
+  LOCKED
+  DISABLED
+  UNKNOWN_USER
+  RATE_LIMITED
+}
+
+enum ClientType {
+  web
+  mobile
+}
+
+model Warehouse {
+  id                String    @id @default(uuid()) @db.Uuid
+  code              String    @unique
+  name              String
+  isActive          Boolean   @default(true)
+  /// Go-live: once set, OPENING entries and opening imports for this warehouse are refused.
+  openingLockedAt   DateTime?
+  openingLockedById String?   @db.Uuid
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  users           UserWarehouse[]
+  openingLockedBy User?           @relation("WarehouseOpeningLockedBy", fields: [openingLockedById], references: [id], onDelete: Restrict)
+  stockCounts     StockCount[]
+
+  entries         StockEntry[]    @relation("EntryWarehouse")
+  incomingEntries StockEntry[]    @relation("EntryToWarehouse")
+  balances        StockBalance[]
+  movements       StockMovement[]
+  projects        Project[]
+  serials         SerialNumber[]
+  purchaseOrders  PurchaseOrder[]
+}
+
+model Role {
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String
+  /// Lower-cased name; enforces case-insensitive uniqueness.
+  nameKey           String   @unique
+  description       String?
+  /// The built-in Admin role: cannot be edited or deleted.
+  isLocked          Boolean  @default(false)
+  seeCost           Boolean  @default(false)
+  seeProfit         Boolean  @default(false)
+  seeMargin         Boolean  @default(false)
+  /// Bumped on every permission/flag change; embedded in access tokens and used as cache version.
+  permissionVersion Int      @default(1)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       User[]
+}
+
+model RolePermission {
+  roleId String          @db.Uuid
+  module ModuleKey
+  level  PermissionLevel @default(NONE)
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, module])
+}
+
+model User {
+  id                String     @id @default(uuid()) @db.Uuid
+  /// Stored lower-cased; usernames are case-insensitive.
+  username          String     @unique
+  name              String
+  phone             String?
+  email             String?
+  passwordHash      String
+  roleId            String     @db.Uuid
+  status            UserStatus @default(ACTIVE)
+  /// Set after too many failed logins; cleared only when an Admin sets a new password.
+  lockedAt          DateTime?
+  disabledAt        DateTime?
+  /// Bumped when sessions must die immediately (disable, password set). Embedded in access tokens.
+  tokenVersion      Int        @default(0)
+  lastLoginAt       DateTime?
+  passwordChangedAt DateTime   @default(now())
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  role          Role            @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  warehouses    UserWarehouse[]
+  refreshTokens RefreshToken[]
+  loginHistory  LoginHistory[]
+  auditLogs     AuditLog[]
+
+  productsCreated Product[]      @relation("ProductCreatedBy")
+  productsUpdated Product[]      @relation("ProductUpdatedBy")
+  productPhotos   ProductPhoto[]
+
+  entriesCreated  StockEntry[] @relation("EntryCreatedBy")
+  entriesVerified StockEntry[] @relation("EntryVerifiedBy")
+  entriesReceived StockEntry[] @relation("EntryReceivedBy")
+  attachments     Attachment[]
+
+  openingLocks      Warehouse[]              @relation("WarehouseOpeningLockedBy")
+  openingImports    OpeningImport[]
+  countsCreated     StockCount[]             @relation("CountCreatedBy")
+  countsSubmitted   StockCount[]             @relation("CountSubmittedBy")
+  countsApproved    StockCount[]             @relation("CountApprovedBy")
+  countLines        StockCountLine[]
+  notifications     Notification[]
+  notificationPrefs NotificationPreference[]
+
+  posCreated   PurchaseOrder[]         @relation("PoCreatedBy")
+  posApproved  PurchaseOrder[]         @relation("PoApprovedBy")
+  posRejected  PurchaseOrder[]         @relation("PoRejectedBy")
+  posClosed    PurchaseOrder[]         @relation("PoClosedBy")
+  posCancelled PurchaseOrder[]         @relation("PoCancelledBy")
+  poRevisions  PurchaseOrderRevision[]
+
+  // projects
+  projectsEngineered   Project[]              @relation("ProjectSiteEngineer")
+  projectsClosed       Project[]              @relation("ProjectClosedBy")
+  projectsCreated      Project[]              @relation("ProjectCreatedBy")
+  projectCostsCreated  ProjectCost[]          @relation("ProjectCostCreatedBy")
+  projectCostsVoided   ProjectCost[]          @relation("ProjectCostVoidedBy")
+  projectStatusChanges ProjectStatusHistory[]
+
+  // reporting
+  reportSchedules ReportSchedule[]
+
+  @@index([roleId])
+  @@index([status])
+}
+
+model UserWarehouse {
+  userId      String   @db.Uuid
+  warehouseId String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@id([userId, warehouseId])
+  @@index([warehouseId])
+}
+
+model RefreshToken {
+  id            String     @id @default(uuid()) @db.Uuid
+  userId        String     @db.Uuid
+  /// HMAC-SHA256 of the opaque token; the raw token is never stored.
+  tokenHash     String     @unique
+  /// All tokens descending from one login share a family; reuse revokes the family.
+  familyId      String     @db.Uuid
+  client        ClientType
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+  replacedById  String?    @db.Uuid
+  ip            String?
+  userAgent     String?
+  createdAt     DateTime   @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
+  @@index([userId])
+}
+
+model LoginHistory {
+  id                String      @id @default(uuid()) @db.Uuid
+  /// Null when the username did not match any user.
+  userId            String?     @db.Uuid
+  usernameAttempted String
+  result            LoginResult
+  client            ClientType?
+  ip                String?
+  userAgent         String?
+  createdAt         DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@index([result])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  /// The actor; null for system actions.
+  userId     String?  @db.Uuid
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  ip         String?
+  requestId  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  // audit-log report filters
+  @@index([entityType, createdAt])
+  @@index([action, createdAt])
+}
+
+model IdempotencyKey {
+  id             String   @id @default(uuid()) @db.Uuid
+  key            String
+  userId         String   @db.Uuid
+  method         String
+  path           String
+  /// SHA-256 of method + path + body; a different body with the same key is a 409.
+  requestHash    String
+  /// Null while the first request is still being processed.
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@unique([userId, key])
+  @@index([expiresAt])
+}
+
+// ─────────────────────────────── Module 1: catalog ───────────────────────────────
+
+enum ProductStatus {
+  ACTIVE
+  DISCONTINUED
+}
+
+enum ProductSource {
+  IMPORTED
+  LOCAL
+}
+
+/// A brand catalog (LG, Daikin, Dunham-Bush…).
+model Catalog {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  /// Lower-cased name; enforces case-insensitive uniqueness.
+  nameKey     String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+
+  @@index([sortOrder, name])
+}
+
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  nameKey   String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+}
+
+model Unit {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// Lower-case short code (pcs, set, m…).
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products         Product[] @relation("ProductUnit")
+  purchaseProducts Product[] @relation("ProductPurchaseUnit")
+}
+
+/// Never hard-deleted: later modules reference products. Retire with status DISCONTINUED.
+model Product {
+  id                  String         @id @default(uuid()) @db.Uuid
+  /// Upper-case SKU. Immutable after creation.
+  code                String         @unique
+  name                String
+  catalogId           String         @db.Uuid
+  model               String?
+  categoryId          String         @db.Uuid
+  /// Base unit: stock is always counted in this unit.
+  unitId              String         @db.Uuid
+  /// Sensitive (role flag seeCost). BDT.
+  purchaseCost        Decimal        @db.Decimal(14, 2)
+  sellingPrice        Decimal        @db.Decimal(14, 2)
+  purchaseUnitId      String?        @db.Uuid
+  /// Base units per purchase unit (e.g. 1 roll = 50 m).
+  purchaseUnitFactor  Decimal?       @db.Decimal(14, 3)
+  minStockLevel       Decimal?       @db.Decimal(14, 3)
+  barcode             String?        @unique
+  trackSerial         Boolean        @default(false)
+  warrantyMonths      Int?
+  /// Default supplier (purchasing). Low-stock "Create PO" groups by it.
+  defaultSupplierId   String?        @db.Uuid
+  /// Legacy free text (Module 1); kept only when no supplier record matched it.
+  defaultSupplierName String?
+  source              ProductSource?
+  countryOfOrigin     String?
+  hsCode              String?
+  capacity            String?
+  refrigerant         String?
+  powerSupply         String?
+  dimensionsWeight    String?
+  specifications      String?
+  status              ProductStatus  @default(ACTIVE)
+  discontinuedAt      DateTime?
+  createdById         String?        @db.Uuid
+  updatedById         String?        @db.Uuid
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  catalog         Catalog             @relation(fields: [catalogId], references: [id], onDelete: Restrict)
+  category        Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  unit            Unit                @relation("ProductUnit", fields: [unitId], references: [id], onDelete: Restrict)
+  purchaseUnit    Unit?               @relation("ProductPurchaseUnit", fields: [purchaseUnitId], references: [id], onDelete: Restrict)
+  createdBy       User?               @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy       User?               @relation("ProductUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  defaultSupplier Supplier?           @relation("ProductDefaultSupplier", fields: [defaultSupplierId], references: [id], onDelete: SetNull)
+  photos          ProductPhoto[]
+  entryLines      StockEntryLine[]
+  balances        StockBalance[]
+  movements       StockMovement[]
+  cost            ProductCost?
+  serials         SerialNumber[]
+  inTransit       StockInTransit[]
+  reservations    StockReservation[]
+  countLines      StockCountLine[]
+  lowStock        LowStockState?
+  poLines         PurchaseOrderLine[]
+
+  @@index([catalogId, status])
+  @@index([defaultSupplierId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([name])
+  @@index([createdAt])
+}
+
+model ProductPhoto {
+  id           String   @id @default(uuid()) @db.Uuid
+  productId    String   @db.Uuid
+  /// Object-storage keys (private bucket).
+  storageKey   String
+  thumbnailKey String
+  contentType  String
+  sizeBytes    Int
+  width        Int
+  height       Int
+  isPrimary    Boolean  @default(false)
+  sortOrder    Int      @default(0)
+  createdById  String?  @db.Uuid
+  createdAt    DateTime @default(now())
+
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([productId, sortOrder])
+}
+
+// ─────────────────────────────── Module 2: inventory ───────────────────────────────
+
+enum SupplierType {
+  LOCAL
+  FOREIGN
+}
+
+enum CurrencyCode {
+  BDT
+  USD
+  EUR
+  CNY
+  MYR
+  THB
+}
+
+enum ProjectStatus {
+  PLANNING
+  RUNNING
+  ON_HOLD
+  COMPLETED
+  CLOSED
+}
+
+enum ProjectType {
+  OFFICE
+  HOSPITAL
+  INSTITUTION
+  RETAIL
+  INDUSTRIAL
+  RESIDENTIAL
+  OTHER
+}
+
+enum ProjectCostCategory {
+  LABOUR
+  TRANSPORT
+  OTHER
+}
+
+enum StockEntryType {
+  GRN_IMPORT
+  GRN_LOCAL
+  RETURN_FROM_SITE
+  OPENING
+  ISSUE_TO_PROJECT
+  SALE
+  RETURN_TO_SUPPLIER
+  DAMAGE_WRITE_OFF
+  TRANSFER
+  REVERSAL
+  STOCK_ADJUSTMENT
+}
+
+enum AdjustmentDirection {
+  GAIN
+  LOSS
+}
+
+enum StockEntryStatus {
+  DRAFT
+  PENDING
+  POSTED
+  REJECTED
+  CANCELLED
+  REVERSED
+  DISPATCHED
+  RECEIVED
+}
+
+enum StockCondition {
+  GOOD
+  DAMAGED
+}
+
+enum LandedChargeType {
+  CUSTOMS_DUTY
+  AIT
+  IMPORT_VAT
+  FREIGHT
+  INSURANCE
+  CNF
+  OTHER
+}
+
+enum LandedChargeMode {
+  PERCENT_OF_GOODS
+  AMOUNT_BDT
+}
+
+enum SerialStatus {
+  IN_STOCK
+  RESERVED
+  IN_TRANSIT
+  ISSUED
+  SOLD
+  RETURNED_TO_SUPPLIER
+  WRITTEN_OFF
+  DAMAGED
+}
+
+/// Owned by the purchasing module since Module 4 (inventory only reads it for GRNs and returns).
+model Supplier {
+  id               String       @id @default(uuid()) @db.Uuid
+  /// SUP-001, SUP-002… (DocumentSequence "SUPPLIER").
+  code             String       @unique
+  name             String
+  nameKey          String       @unique
+  type             SupplierType @default(LOCAL)
+  /// Currency of its quotations and imported POs (column "currency" since Module 2).
+  defaultCurrency  CurrencyCode @default(BDT) @map("currency")
+  contactPerson    String?
+  phone            String?
+  email            String?
+  address          String?
+  brandsSupplied   String?
+  paymentTermsNote String?
+  notes            String?
+  isActive         Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  entries        StockEntry[]
+  serials        SerialNumber[]
+  purchaseOrders PurchaseOrder[]
+  products       Product[]       @relation("ProductDefaultSupplier")
+}
+
+model Customer {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  nameKey       String   @unique
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  entries StockEntry[]
+  serials SerialNumber[]
+}
+
+/// Owned by the projects module (Module 5); inventory only reads it (issues / returns).
+model Project {
+  id                  String        @id @default(uuid()) @db.Uuid
+  /// PRJ-001, PRJ-002 (DocumentSequence "PROJECT").
+  code                String        @unique
+  name                String
+  clientName          String?
+  clientContactPerson String?
+  clientPhone         String?
+  clientEmail         String?
+  siteAddress         String?
+  projectType         ProjectType   @default(OTHER)
+  status              ProjectStatus @default(PLANNING)
+  defaultWarehouseId  String?       @db.Uuid
+  startDate           DateTime?     @db.Date
+  expectedEndDate     DateTime?     @db.Date
+  actualEndDate       DateTime?     @db.Date
+  /// Site engineer: a user, or a free-text name for someone outside the system.
+  siteEngineerUserId  String?       @db.Uuid
+  siteEngineerName    String?
+  /// Sensitive (seeMargin).
+  contractValue       Decimal?      @db.Decimal(14, 2)
+  notes               String?
+  closedAt            DateTime?
+  closedById          String?       @db.Uuid
+  closeReason         String?
+  /// Highest cost-used threshold already alerted (0, 90 or 100); re-arms when cost falls back below it.
+  costAlertLevel      Int           @default(0)
+  createdById         String?       @db.Uuid
+  isActive            Boolean       @default(true)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  defaultWarehouse Warehouse?             @relation(fields: [defaultWarehouseId], references: [id], onDelete: SetNull)
+  siteEngineer     User?                  @relation("ProjectSiteEngineer", fields: [siteEngineerUserId], references: [id], onDelete: SetNull)
+  closedBy         User?                  @relation("ProjectClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
+  createdBy        User?                  @relation("ProjectCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  entries          StockEntry[]
+  serials          SerialNumber[]
+  purchaseOrders   PurchaseOrder[]
+  costs            ProjectCost[]
+  statusHistory    ProjectStatusHistory[]
+
+  @@index([status])
+  @@index([siteEngineerUserId])
+}
+
+/// Labour, transport and other costs entered by hand. Never deleted: a mistake is voided (and excluded from totals).
+model ProjectCost {
+  id            String              @id @default(uuid()) @db.Uuid
+  projectId     String              @db.Uuid
+  date          DateTime            @db.Date
+  category      ProjectCostCategory
+  description   String
+  amount        Decimal             @db.Decimal(14, 2)
+  vendorOrPayee String?
+  referenceNo   String?
+  createdById   String              @db.Uuid
+  voidedAt      DateTime?
+  voidedById    String?             @db.Uuid
+  voidReason    String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  createdBy User    @relation("ProjectCostCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  voidedBy  User?   @relation("ProjectCostVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+
+  @@index([projectId, date])
+}
+
+model ProjectStatusHistory {
+  id          String         @id @default(uuid()) @db.Uuid
+  projectId   String         @db.Uuid
+  /// Null for the status a project was created with.
+  fromStatus  ProjectStatus?
+  toStatus    ProjectStatus
+  changedById String         @db.Uuid
+  reason      String?
+  at          DateTime       @default(now())
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  changedBy User    @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([projectId, at])
+}
+
+/// Gap-free document numbers per (docType, fiscalYear), incremented inside the posting transaction.
+model DocumentSequence {
+  docType    String
+  fiscalYear String
+  lastNumber Int    @default(0)
+
+  @@id([docType, fiscalYear])
+}
+
+/// Single row (id = 1).
+model InventorySettings {
+  id                         Int      @id @default(1)
+  defaultSalesVatPercent     Decimal  @default(15) @db.Decimal(5, 2)
+  adminWriteOffNeedsApproval Boolean  @default(false)
+  allowAdminBelowCostSale    Boolean  @default(true)
+  fiscalYearStartMonth       Int      @default(7)
+  updatedAt                  DateTime @updatedAt
+}
+
+model StockEntry {
+  id              String           @id @default(uuid()) @db.Uuid
+  /// Assigned on submit or post; null while a draft.
+  number          String?          @unique
+  /// Temporary reference shown while a draft (DRAFT-XXXXXX).
+  draftRef        String           @unique
+  type            StockEntryType
+  status          StockEntryStatus @default(DRAFT)
+  entryDate       DateTime         @db.Date
+  warehouseId     String           @db.Uuid
+  toWarehouseId   String?          @db.Uuid
+  supplierId      String?          @db.Uuid
+  customerId      String?          @db.Uuid
+  projectId       String?          @db.Uuid
+  /// The issue (returns from site) or GRN (returns to supplier) this entry refers to.
+  originalEntryId String?          @db.Uuid
+  /// REVERSAL entries: the entry being reversed.
+  reversalOfId    String?          @unique @db.Uuid
+  /// Shortage write-off: the transfer it came from.
+  relatedEntryId  String?          @db.Uuid
+  /// GRNs received against a purchase order (prices then come from the PO, server-side).
+  purchaseOrderId String?          @db.Uuid
+
+  poNumberText      String?
+  supplierInvoiceNo String?
+  lcNo              String?
+  billOfEntryNo     String?
+  challanNo         String?
+  siteAddress       String?
+  receivedBy        String?
+  vehicle           String?
+  reason            String?
+  description       String?
+  customerPhone     String?
+  customerAddress   String?
+  notes             String?
+
+  currency           CurrencyCode @default(BDT)
+  exchangeRate       Decimal      @default(1) @db.Decimal(14, 4)
+  discountAmount     Decimal      @default(0) @db.Decimal(14, 2)
+  vatPercent         Decimal      @default(0) @db.Decimal(5, 2)
+  subtotal           Decimal      @default(0) @db.Decimal(14, 2)
+  vatAmount          Decimal      @default(0) @db.Decimal(14, 2)
+  grandTotal         Decimal      @default(0) @db.Decimal(14, 2)
+  costTotal          Decimal      @default(0) @db.Decimal(14, 2)
+  /// Sale priced below average cost, explicitly confirmed by an Admin.
+  belowCostConfirmed Boolean      @default(false)
+
+  createdById     String    @db.Uuid
+  submittedAt     DateTime?
+  verifiedById    String?   @db.Uuid
+  verifiedAt      DateTime?
+  rejectionReason String?
+  postedAt        DateTime?
+  dispatchedAt    DateTime?
+  receivedById    String?   @db.Uuid
+  receivedAt      DateTime?
+  cancelledAt     DateTime?
+  reversedAt      DateTime?
+  reversalReason  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  warehouse      Warehouse      @relation("EntryWarehouse", fields: [warehouseId], references: [id], onDelete: Restrict)
+  toWarehouse    Warehouse?     @relation("EntryToWarehouse", fields: [toWarehouseId], references: [id], onDelete: Restrict)
+  supplier       Supplier?      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  customer       Customer?      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  project        Project?       @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  originalEntry  StockEntry?    @relation("EntryOriginal", fields: [originalEntryId], references: [id], onDelete: Restrict)
+  referencedBy   StockEntry[]   @relation("EntryOriginal")
+  reversalOf     StockEntry?    @relation("EntryReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy     StockEntry?    @relation("EntryReversal")
+  relatedEntry   StockEntry?    @relation("EntryRelated", fields: [relatedEntryId], references: [id], onDelete: Restrict)
+  relatedFrom    StockEntry[]   @relation("EntryRelated")
+  createdBy      User           @relation("EntryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  verifiedBy     User?          @relation("EntryVerifiedBy", fields: [verifiedById], references: [id], onDelete: Restrict)
+  receivedByUser User?          @relation("EntryReceivedBy", fields: [receivedById], references: [id], onDelete: Restrict)
+  purchaseOrder  PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+
+  lines        StockEntryLine[]
+  charges      LandedCostCharge[]
+  movements    StockMovement[]
+  reservations StockReservation[]
+  inTransit    StockInTransit[]
+  serialMoves  SerialMovement[]
+  stockCount   StockCount?
+
+  @@index([type, status])
+  @@index([status])
+  @@index([warehouseId, entryDate])
+  @@index([toWarehouseId, status])
+  @@index([projectId])
+  @@index([customerId])
+  @@index([supplierId])
+  @@index([createdById])
+  @@index([entryDate])
+  @@index([purchaseOrderId])
+  // sales / damage & loss / pending reports
+  @@index([type, status, entryDate])
+}
+
+model StockEntryLine {
+  id                  String               @id @default(uuid()) @db.Uuid
+  entryId             String               @db.Uuid
+  lineNo              Int
+  productId           String               @db.Uuid
+  qty                 Decimal              @db.Decimal(14, 3)
+  /// Foreign-currency cost (imports), BDT cost (local/opening), selling price (sales).
+  unitPrice           Decimal              @default(0) @db.Decimal(14, 4)
+  /// Final BDT cost per unit used for posting.
+  unitCostBdt         Decimal              @default(0) @db.Decimal(14, 4)
+  landedUnitCost      Decimal?             @db.Decimal(14, 4)
+  /// Sales value (sales), BDT goods value (imports), cost value (others).
+  amount              Decimal              @default(0) @db.Decimal(14, 2)
+  /// Cost value of the line (exact, including its landed-cost share).
+  costAmount          Decimal              @default(0) @db.Decimal(14, 2)
+  /// Returns from site: where goods go. Out lines: which balance they come from.
+  condition           StockCondition       @default(GOOD)
+  originalLineId      String?              @db.Uuid
+  /// Transfers: quantity confirmed on receipt.
+  receivedQty         Decimal?             @db.Decimal(14, 3)
+  /// STOCK_ADJUSTMENT lines: stock found (GAIN) or missing (LOSS).
+  adjustDirection     AdjustmentDirection?
+  /// GRN lines received against a purchase order line.
+  purchaseOrderLineId String?              @db.Uuid
+  note                String?
+
+  entry        StockEntry         @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  product      Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  originalLine StockEntryLine?    @relation("LineOriginal", fields: [originalLineId], references: [id], onDelete: Restrict)
+  returnLines  StockEntryLine[]   @relation("LineOriginal")
+  poLine       PurchaseOrderLine? @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
+  serials      EntryLineSerial[]
+  movements    StockMovement[]
+
+  @@index([entryId])
+  @@index([productId])
+  @@index([originalLineId])
+  @@index([purchaseOrderLineId])
+}
+
+model LandedCostCharge {
+  id            String           @id @default(uuid()) @db.Uuid
+  entryId       String           @db.Uuid
+  type          LandedChargeType
+  mode          LandedChargeMode
+  value         Decimal          @db.Decimal(14, 4)
+  includeInCost Boolean          @default(true)
+  label         String?
+  /// Computed BDT amount.
+  amountBdt     Decimal          @default(0) @db.Decimal(14, 2)
+  sortOrder     Int              @default(0)
+
+  entry StockEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+}
+
+model StockBalance {
+  id          String         @id @default(uuid()) @db.Uuid
+  productId   String         @db.Uuid
+  warehouseId String         @db.Uuid
+  condition   StockCondition
+  qtyOnHand   Decimal        @default(0) @db.Decimal(14, 3)
+  qtyReserved Decimal        @default(0) @db.Decimal(14, 3)
+  updatedAt   DateTime       @updatedAt
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@unique([productId, warehouseId, condition])
+  @@index([warehouseId])
+}
+
+/// Quantities held by PENDING out and transfer entries.
+model StockReservation {
+  id          String         @id @default(uuid()) @db.Uuid
+  entryId     String         @db.Uuid
+  productId   String         @db.Uuid
+  warehouseId String         @db.Uuid
+  condition   StockCondition
+  qty         Decimal        @db.Decimal(14, 3)
+
+  entry   StockEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  product Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([entryId, productId, warehouseId, condition])
+  @@index([productId, warehouseId])
+}
+
+model StockInTransit {
+  id              String   @id @default(uuid()) @db.Uuid
+  transferEntryId String   @db.Uuid
+  productId       String   @db.Uuid
+  qty             Decimal  @db.Decimal(14, 3)
+  /// Value moved out of the source warehouse (BDT).
+  value           Decimal  @db.Decimal(14, 2)
+  createdAt       DateTime @default(now())
+
+  transfer StockEntry @relation(fields: [transferEntryId], references: [id], onDelete: Restrict)
+  product  Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([transferEntryId, productId])
+  @@index([productId])
+}
+
+/// Company-wide weighted average cost per product.
+model ProductCost {
+  productId  String   @id @db.Uuid
+  totalQty   Decimal  @default(0) @db.Decimal(14, 3)
+  totalValue Decimal  @default(0) @db.Decimal(16, 2)
+  avgCost    Decimal  @default(0) @db.Decimal(14, 4)
+  updatedAt  DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+/// Append-only stock ledger. A database trigger rejects UPDATE and DELETE.
+model StockMovement {
+  id           String         @id @default(uuid()) @db.Uuid
+  seq          BigInt         @unique @default(autoincrement())
+  entryId      String         @db.Uuid
+  lineId       String?        @db.Uuid
+  productId    String         @db.Uuid
+  warehouseId  String         @db.Uuid
+  condition    StockCondition
+  qtyChange    Decimal        @db.Decimal(14, 3)
+  unitCost     Decimal        @db.Decimal(14, 4)
+  valueChange  Decimal        @db.Decimal(14, 2)
+  /// Warehouse + condition balance after this movement.
+  balanceAfter Decimal        @db.Decimal(14, 3)
+  avgCostAfter Decimal        @db.Decimal(14, 4)
+  postedAt     DateTime       @default(now())
+
+  entry     StockEntry      @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  line      StockEntryLine? @relation(fields: [lineId], references: [id], onDelete: Restrict)
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@index([productId, seq])
+  @@index([warehouseId, seq])
+  @@index([entryId])
+  @@index([postedAt])
+  // stock movement report (date range per warehouse), dashboard in/out chart
+  @@index([warehouseId, postedAt])
+  @@index([productId, postedAt])
+}
+
+model SerialNumber {
+  id              String       @id @default(uuid()) @db.Uuid
+  productId       String       @db.Uuid
+  /// Stored upper-case and trimmed.
+  serial          String
+  status          SerialStatus
+  warehouseId     String?      @db.Uuid
+  projectId       String?      @db.Uuid
+  customerId      String?      @db.Uuid
+  supplierId      String?      @db.Uuid
+  /// PENDING entry holding this serial.
+  reservedEntryId String?      @db.Uuid
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  product   Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse Warehouse?        @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  project   Project?          @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  customer  Customer?         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  supplier  Supplier?         @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  movements SerialMovement[]
+  lines     EntryLineSerial[]
+
+  @@unique([productId, serial])
+  @@index([serial])
+  @@index([status, warehouseId])
+}
+
+model SerialMovement {
+  id              String        @id @default(uuid()) @db.Uuid
+  seq             BigInt        @unique @default(autoincrement())
+  serialId        String        @db.Uuid
+  entryId         String        @db.Uuid
+  fromStatus      SerialStatus?
+  toStatus        SerialStatus
+  fromWarehouseId String?       @db.Uuid
+  toWarehouseId   String?       @db.Uuid
+  at              DateTime      @default(now())
+
+  serialNumber SerialNumber @relation(fields: [serialId], references: [id], onDelete: Restrict)
+  entry        StockEntry   @relation(fields: [entryId], references: [id], onDelete: Restrict)
+
+  @@index([serialId, seq])
+  @@index([entryId])
+}
+
+/// Serial numbers on an entry line. serialId is set once the serial exists (IN entries: at posting).
+model EntryLineSerial {
+  id       String  @id @default(uuid()) @db.Uuid
+  lineId   String  @db.Uuid
+  serial   String
+  serialId String? @db.Uuid
+  /// Transfers: false when the unit did not arrive.
+  received Boolean @default(true)
+
+  line         StockEntryLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  serialNumber SerialNumber?  @relation(fields: [serialId], references: [id], onDelete: Restrict)
+
+  @@unique([lineId, serial])
+}
+
+/// Generic file attachment (stock entries now; purchases and projects later).
+model Attachment {
+  id           String   @id @default(uuid()) @db.Uuid
+  entityType   String
+  entityId     String   @db.Uuid
+  fileKey      String
+  fileName     String
+  mimeType     String
+  size         Int
+  label        String?
+  uploadedById String   @db.Uuid
+  createdAt    DateTime @default(now())
+
+  uploadedBy User @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId])
+}
+
+/**
+ * ───────────────────── Module 3: opening import, stock count, alerts, notifications ─────────────────────
+ */
+
+enum OpeningImportStatus {
+  QUEUED
+  VALIDATING
+  VALID
+  INVALID
+  COMMITTED
+  FAILED
+}
+
+/// An uploaded opening-stock workbook: validated by the worker, committed in one transaction.
+model OpeningImport {
+  id           String              @id @default(uuid()) @db.Uuid
+  fileKey      String
+  fileName     String
+  status       OpeningImportStatus @default(QUEUED)
+  totalRows    Int                 @default(0)
+  /// Normalised valid rows (warehouse, product, condition, qty, cost, serials, note).
+  rows         Json?
+  errors       Json?
+  warnings     Json?
+  /// Per-warehouse lines / qty / value.
+  summary      Json?
+  /// OPENING entries created by the commit.
+  entryIds     String[]            @db.Uuid
+  failedReason String?
+  createdById  String              @db.Uuid
+  committedAt  DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+}
+
+enum StockCountScope {
+  ALL
+  CATALOG
+  CATEGORY
+  SELECTED_PRODUCTS
+}
+
+enum StockCountStatus {
+  DRAFT
+  COUNTING
+  SUBMITTED
+  APPROVED
+  CANCELLED
+}
+
+enum CountSerialResult {
+  FOUND
+  MISSING
+  UNEXPECTED
+}
+
+model StockCount {
+  id                 String           @id @default(uuid()) @db.Uuid
+  /// SC-{FY}-0001
+  number             String           @unique
+  warehouseId        String           @db.Uuid
+  scope              StockCountScope
+  /// Catalog / category / product ids, depending on the scope.
+  scopeIds           String[]         @db.Uuid
+  blindCount         Boolean          @default(false)
+  status             StockCountStatus @default(DRAFT)
+  notes              String?
+  /// Snapshot time (start of counting).
+  startedAt          DateTime?
+  submittedAt        DateTime?
+  approvedAt         DateTime?
+  cancelledAt        DateTime?
+  recountRequestedAt DateTime?
+  createdById        String           @db.Uuid
+  submittedById      String?          @db.Uuid
+  approvedById       String?          @db.Uuid
+  adjustmentEntryId  String?          @unique @db.Uuid
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  warehouse       Warehouse        @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  createdBy       User             @relation("CountCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  submittedBy     User?            @relation("CountSubmittedBy", fields: [submittedById], references: [id], onDelete: Restrict)
+  approvedBy      User?            @relation("CountApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  adjustmentEntry StockEntry?      @relation(fields: [adjustmentEntryId], references: [id], onDelete: Restrict)
+  lines           StockCountLine[]
+
+  @@index([warehouseId, status])
+  @@index([status])
+}
+
+model StockCountLine {
+  id               String         @id @default(uuid()) @db.Uuid
+  countId          String         @db.Uuid
+  productId        String         @db.Uuid
+  condition        StockCondition @default(GOOD)
+  /// On hand when counting started.
+  systemQty        Decimal?       @db.Decimal(14, 3)
+  countedQty       Decimal?       @db.Decimal(14, 3)
+  /// Explicitly marked "not counted = 0".
+  notCounted       Boolean        @default(false)
+  countedById      String?        @db.Uuid
+  countedAt        DateTime?
+  recountRequested Boolean        @default(false)
+  note             String?
+
+  count     StockCount         @relation(fields: [countId], references: [id], onDelete: Cascade)
+  product   Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  countedBy User?              @relation(fields: [countedById], references: [id], onDelete: Restrict)
+  serials   StockCountSerial[]
+
+  @@unique([countId, productId, condition])
+  @@index([productId])
+}
+
+model StockCountSerial {
+  id     String            @id @default(uuid()) @db.Uuid
+  lineId String            @db.Uuid
+  serial String
+  result CountSerialResult
+
+  line StockCountLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  @@unique([lineId, serial])
+}
+
+/// Low-stock alert settings (single row).
+model AlertSettings {
+  id              Int      @id @default(1)
+  /// Roles whose users receive low-stock alerts.
+  lowStockRoleIds String[] @db.Uuid
+  digestEnabled   Boolean  @default(true)
+  /// HH:mm, Asia/Dhaka.
+  digestTime      String   @default("09:00")
+  updatedAt       DateTime @updatedAt
+}
+
+/// Which products are below their minimum, so an alert fires once per crossing.
+model LowStockState {
+  productId String    @id @db.Uuid
+  isLow     Boolean   @default(false)
+  since     DateTime?
+  updatedAt DateTime  @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model NotificationType {
+  key          String  @id
+  label        String
+  description  String
+  /// Email preference for users who haven't chosen.
+  defaultEmail Boolean @default(false)
+  sortOrder    Int     @default(0)
+}
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  type      String
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}
+
+model NotificationPreference {
+  userId String  @db.Uuid
+  type   String
+  /// In-app is always on.
+  inApp  Boolean @default(true)
+  email  Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, type])
+}
+
+enum EmailStatus {
+  QUEUED
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model EmailLog {
+  id        String      @id @default(uuid()) @db.Uuid
+  to        String
+  subject   String
+  type      String?
+  status    EmailStatus @default(QUEUED)
+  attempts  Int         @default(0)
+  error     String?
+  sentAt    DateTime?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────── Module 4: purchasing ───────────────────────────────
+
+enum PurchaseOrderType {
+  LOCAL
+  IMPORTED
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  PENDING_APPROVAL
+  REJECTED
+  APPROVED
+  SENT
+  PARTLY_RECEIVED
+  FULLY_RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id                   String              @id @default(uuid()) @db.Uuid
+  /// PO-{FY}-0001, assigned on submit / approve (gap-free, DocumentSequence "PO").
+  number               String?             @unique
+  /// Temporary reference while a draft (DRAFT-XXXXXXXXXX).
+  draftRef             String              @unique
+  supplierId           String              @db.Uuid
+  /// From the supplier's type when created; never changes.
+  type                 PurchaseOrderType
+  currency             CurrencyCode        @default(BDT)
+  /// Imported POs: indicative BDT per unit of the currency (the GRN may use the customs rate).
+  exchangeRate         Decimal             @default(1) @db.Decimal(14, 4)
+  poDate               DateTime            @db.Date
+  expectedDeliveryDate DateTime?           @db.Date
+  deliverToWarehouseId String              @db.Uuid
+  projectId            String?             @db.Uuid
+  supplierQuoteRef     String?
+  /// Local POs only.
+  discountAmount       Decimal             @default(0) @db.Decimal(14, 2)
+  vatPercent           Decimal             @default(0) @db.Decimal(5, 2)
+  /// In the PO currency.
+  subtotal             Decimal             @default(0) @db.Decimal(14, 2)
+  vatAmount            Decimal             @default(0) @db.Decimal(14, 2)
+  total                Decimal             @default(0) @db.Decimal(14, 2)
+  totalBdt             Decimal             @default(0) @db.Decimal(16, 2)
+  /// Printed on the PDF.
+  terms                String?
+  notes                String?
+  status               PurchaseOrderStatus @default(DRAFT)
+  revision             Int                 @default(0)
+  createdById          String              @db.Uuid
+  submittedAt          DateTime?
+  approvedById         String?             @db.Uuid
+  approvedAt           DateTime?
+  rejectedById         String?             @db.Uuid
+  rejectedAt           DateTime?
+  rejectionReason      String?
+  sentAt               DateTime?
+  closedById           String?             @db.Uuid
+  closedAt             DateTime?
+  closedReason         String?
+  cancelledById        String?             @db.Uuid
+  cancelledAt          DateTime?
+  cancelledReason      String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  supplier    Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  deliverTo   Warehouse @relation(fields: [deliverToWarehouseId], references: [id], onDelete: Restrict)
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  createdBy   User      @relation("PoCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy  User?     @relation("PoApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  rejectedBy  User?     @relation("PoRejectedBy", fields: [rejectedById], references: [id], onDelete: Restrict)
+  closedBy    User?     @relation("PoClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
+  cancelledBy User?     @relation("PoCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+
+  lines     PurchaseOrderLine[]
+  revisions PurchaseOrderRevision[]
+  receipts  StockEntry[]
+
+  @@index([status])
+  @@index([supplierId, poDate])
+  @@index([deliverToWarehouseId, status])
+  @@index([projectId])
+  @@index([poDate])
+  @@index([expectedDeliveryDate])
+  @@index([createdById])
+}
+
+model PurchaseOrderLine {
+  id                String   @id @default(uuid()) @db.Uuid
+  poId              String   @db.Uuid
+  lineNo            Int
+  productId         String   @db.Uuid
+  qty               Decimal  @db.Decimal(14, 3)
+  /// In the PO currency.
+  unitPrice         Decimal  @db.Decimal(14, 4)
+  amount            Decimal  @db.Decimal(14, 2)
+  /// Posted GRNs.
+  receivedQty       Decimal  @default(0) @db.Decimal(14, 3)
+  /// GRNs submitted but not yet posted.
+  pendingReceiptQty Decimal  @default(0) @db.Decimal(14, 3)
+  note              String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  po         PurchaseOrder    @relation(fields: [poId], references: [id], onDelete: Cascade)
+  product    Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  entryLines StockEntryLine[]
+
+  @@unique([poId, productId])
+  @@index([productId])
+}
+
+/// The PO as it was before an amendment (header + lines), with who, why and what changed.
+model PurchaseOrderRevision {
+  id          String   @id @default(uuid()) @db.Uuid
+  poId        String   @db.Uuid
+  /// The revision number this amendment created.
+  revision    Int
+  changedById String   @db.Uuid
+  reason      String
+  snapshot    Json
+  /// Human-readable list of the changes.
+  changes     Json
+  createdAt   DateTime @default(now())
+
+  po        PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  changedBy User          @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@unique([poId, revision])
+}
+
+/// Single row (id = 1).
+model PurchasingSettings {
+  id                Int      @id @default(1)
+  /// Pre-filled on new POs and printed on the PDF.
+  defaultTerms      String?
+  /// Default VAT % on local POs.
+  defaultVatPercent Decimal  @default(0) @db.Decimal(5, 2)
+  updatedAt         DateTime @updatedAt
+}
+
+// ─────────────────────────────── Module 6: reporting ───────────────────────────────
+
+enum ReportFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum ReportFileFormat {
+  XLSX
+  PDF
+  BOTH
+}
+
+enum ReportRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum ReportRunTrigger {
+  SCHEDULE
+  MANUAL
+}
+
+/// A report emailed on a schedule. Runs with the owner's permissions at run time.
+model ReportSchedule {
+  id               String           @id @default(uuid()) @db.Uuid
+  reportId         String
+  /// Raw filter values (relative dates such as "monthStart" are resolved at run time).
+  params           Json             @default("{}")
+  frequency        ReportFrequency
+  /// WEEKLY: 0 = Sunday … 6 = Saturday.
+  dayOfWeek        Int?
+  /// MONTHLY: 1–31; 31 = the last day of the month.
+  dayOfMonth       Int?
+  /// HH:mm, Asia/Dhaka.
+  time             String
+  format           ReportFileFormat @default(XLSX)
+  recipientUserIds String[]         @db.Uuid
+  /// Reports FULL only.
+  externalEmails   String[]
+  ownerId          String           @db.Uuid
+  isActive         Boolean          @default(true)
+  nextRunAt        DateTime?
+  lastRunAt        DateTime?
+  lastStatus       ReportRunStatus?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  owner User                @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  runs  ReportScheduleRun[]
+
+  @@index([isActive, nextRunAt])
+  @@index([ownerId])
+}
+
+model ReportScheduleRun {
+  id         String           @id @default(uuid()) @db.Uuid
+  scheduleId String           @db.Uuid
+  trigger    ReportRunTrigger @default(SCHEDULE)
+  startedAt  DateTime         @default(now())
+  finishedAt DateTime?
+  status     ReportRunStatus  @default(RUNNING)
+  error      String?
+  rowCount   Int?
+  /// Object-storage keys of every generated file.
+  fileKeys   String[]
+  /// The files with name, format and who they were generated for (flags + warehouses).
+  files      Json             @default("[]")
+  /// How many emails were queued.
+  emailed    Int              @default(0)
+
+  schedule ReportSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId, startedAt])
+}

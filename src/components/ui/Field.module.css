@@ -1,0 +1,229 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  letter-spacing: 0.16px;
+  padding: 0;
+}
+
+.input {
+  width: 100%;
+  height: var(--field-height);
+  padding: 0 var(--space-5);
+  background: var(--color-field);
+  border: none;
+  border-bottom: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  font-size: var(--text-md);
+  color: var(--color-text-primary);
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: background-color 70ms ease, outline 70ms ease;
+}
+
+.input::placeholder {
+  color: var(--color-text-placeholder);
+}
+
+.input:hover:not(:disabled) {
+  background: var(--color-field-hover);
+}
+
+.input:focus {
+  outline: var(--focus-ring);
+}
+
+.input:disabled {
+  color: var(--color-text-disabled);
+  border-bottom-color: transparent;
+  cursor: not-allowed;
+}
+
+.invalid,
+.invalid:focus {
+  outline: 2px solid var(--color-error);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.select {
+  appearance: none;
+  padding-right: var(--space-8);
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='%23161616' d='M8 11 3 6l.7-.7L8 9.6l4.3-4.3L13 6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-4) center;
+}
+
+.helper,
+.error {
+  font-size: var(--text-xs);
+  line-height: 1.34;
+}
+
+.helper {
+  color: var(--color-text-secondary);
+}
+
+.error {
+  color: var(--color-error);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.group > .label {
+  margin-bottom: var(--space-2);
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 24px;
+}
+
+.checkbox {
+  appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid var(--color-text-primary);
+  border-radius: 1px;
+  background: var(--color-surface);
+  cursor: pointer;
+  display: grid;
+  place-content: center;
+}
+
+.checkbox::before {
+  content: "";
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid var(--color-text-on-color);
+  border-bottom: 2px solid var(--color-text-on-color);
+  transform: rotate(-45deg) translate(1px, -1px);
+  opacity: 0;
+}
+
+.checkbox:checked {
+  background: var(--color-text-primary);
+}
+
+.checkbox:checked::before {
+  opacity: 1;
+}
+
+.checkbox:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.checkbox:disabled {
+  border-color: var(--color-disabled-bg);
+  cursor: not-allowed;
+}
+
+.checkbox:disabled:checked {
+  background: var(--color-disabled-bg);
+}
+
+.checkboxLabel {
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+@media (max-width: 671px) {
+  .input {
+    height: var(--touch-target);
+  }
+  .checkboxRow {
+    min-height: var(--touch-target);
+  }
+}
+
+.textarea {
+  height: auto;
+  min-height: 80px;
+  padding: var(--space-4) var(--space-5);
+  resize: vertical;
+  line-height: var(--line-height);
+}
+
+.toggleRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.toggle {
+  flex: none;
+  position: relative;
+  width: 48px;
+  height: 24px;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-strong);
+  cursor: pointer;
+  transition: background-color 70ms ease;
+}
+
+.toggleKnob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  transition: transform 70ms ease;
+}
+
+.toggleOn {
+  background: var(--color-success);
+}
+
+.toggleOn .toggleKnob {
+  transform: translateX(24px);
+}
+
+.toggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.toggle:disabled {
+  background: var(--color-disabled-bg);
+  cursor: not-allowed;
+}
+
+.toggleLabel {
+  font-size: var(--text-md);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.toggleState {
+  margin-left: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}

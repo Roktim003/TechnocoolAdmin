@@ -1,0 +1,476 @@
+.workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (max-width: 1055px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── Report list (grouped, numbered) ── */
+.list {
+  background: var(--color-surface);
+  padding: var(--space-3) 0;
+  position: sticky;
+  top: calc(var(--shell-header-height) + var(--space-5));
+}
+
+@media (max-width: 1055px) {
+  .list {
+    position: static;
+    max-height: 280px;
+    overflow: auto;
+  }
+}
+
+.group + .group {
+  margin-top: var(--space-3);
+}
+
+.group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.groupTitle {
+  padding: var(--space-3) var(--space-5) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.32px;
+}
+
+.item {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  width: 100%;
+  min-height: var(--shell-nav-item-height);
+  padding: var(--space-3) var(--space-5);
+  border: 0;
+  border-left: 3px solid transparent;
+  background: none;
+  text-align: left;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--color-layer-hover);
+}
+
+.itemSelected,
+.itemSelected:hover {
+  background: var(--color-info-bg);
+  border-left-color: var(--color-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.itemNo {
+  display: inline-block;
+  min-width: 20px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.main {
+  min-width: 0;
+}
+
+/* ── Report ── */
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.reportHead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-5);
+  background: var(--color-surface);
+  padding: var(--space-5);
+}
+
+.eyebrow {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.32px;
+}
+
+.reportTitle {
+  margin-top: var(--space-2);
+  font-size: 20px;
+  font-weight: var(--weight-regular);
+}
+
+.reportDescription {
+  margin-top: var(--space-2);
+  max-width: 720px;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+  background: var(--color-surface);
+  padding: var(--space-5);
+}
+
+.fieldset .filters {
+  padding: 0;
+}
+
+.filter {
+  flex: 0 1 190px;
+  min-width: 150px;
+}
+
+.filterWide {
+  flex: 1 1 220px;
+}
+
+.dateParam {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.checkField {
+  min-height: var(--field-height);
+  display: flex;
+  align-items: center;
+}
+
+.filterButtons {
+  display: flex;
+  gap: var(--space-3);
+}
+
+/* ── KPI tiles ── */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--space-3);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface);
+  border-top: 3px solid var(--color-primary);
+}
+
+.tileLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.tileValue {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Table ── */
+.tableTile {
+  background: var(--color-surface);
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th {
+  background: var(--color-selected);
+  text-align: left;
+  font-weight: var(--weight-semibold);
+  padding: var(--space-3) var(--space-4);
+  white-space: nowrap;
+  height: var(--field-height);
+}
+
+.table td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.table tbody tr:hover td {
+  background: var(--color-layer-hover);
+}
+
+.end {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.negative {
+  color: var(--color-error);
+}
+
+.stale {
+  opacity: 0.55;
+}
+
+.message {
+  padding: var(--space-8) var(--space-5) !important;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.sortButton {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  border: 0;
+  padding: 0;
+  background: none;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.sortIcon {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.rowLink {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.rowLink:hover {
+  text-decoration: underline;
+}
+
+.muted {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.recipients {
+  max-width: 280px;
+}
+
+/* ── Schedules ── */
+.schedules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-4);
+}
+
+.fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.legend {
+  padding: 0;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.recipientList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-2) var(--space-4);
+  max-height: 200px;
+  overflow: auto;
+  margin-top: var(--space-3);
+}
+
+.fieldError {
+  margin-top: var(--space-2);
+  color: var(--color-error);
+  font-size: var(--text-xs);
+}
+
+/* ── Run history drawer ── */
+.drawerOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--color-overlay);
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(480px, 100%);
+  overflow: auto;
+  padding: var(--space-6) var(--space-5);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.drawerHead {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.drawerClose {
+  width: var(--touch-target);
+  height: var(--touch-target);
+  flex: none;
+  border: 0;
+  background: none;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.drawerClose:hover {
+  background: var(--color-layer-hover);
+}
+
+.runs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.run {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.runHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.runFiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ── Print: the report only, with its filters, on white ── */
+.printOnly {
+  display: none;
+}
+
+.landscape {
+}
+
+@media print {
+  .noPrint {
+    display: none !important;
+  }
+  .printOnly {
+    display: block;
+    margin-top: var(--space-3);
+    font-size: var(--text-xs);
+  }
+  .layout {
+    display: block;
+  }
+  .reportHead,
+  .tile,
+  .tableTile {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .reportHead {
+    border-bottom: 2px solid #000;
+  }
+  .scroll {
+    overflow: visible;
+  }
+  .table {
+    font-size: 9pt;
+  }
+  .table thead {
+    display: table-header-group;
+  }
+  .table tr {
+    break-inside: avoid;
+  }
+  .table th {
+    background: #e0e0e0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .table tbody tr:hover td {
+    background: none;
+  }
+  .rowLink {
+    color: inherit;
+  }
+  .landscape {
+    page: landscape;
+  }
+}

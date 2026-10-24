@@ -1,0 +1,276 @@
+.admin {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.notice {
+  margin-bottom: var(--space-5);
+}
+
+.panel {
+  margin-top: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+/* Table toolbar */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+.searchField {
+  flex: 1 1 240px;
+}
+
+.filterField {
+  flex: 0 1 200px;
+}
+
+.toolbarEnd {
+  margin-left: auto;
+}
+
+.sortButton {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: var(--weight-semibold);
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Cells */
+.nameCell {
+  display: flex;
+  flex-direction: column;
+  color: var(--color-text-primary);
+}
+
+.subtle {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.rowActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+/* Forms */
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-6) var(--space-5);
+}
+
+.full {
+  grid-column: 1 / -1;
+}
+
+.checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+}
+
+/* Section tiles */
+.tile {
+  background: var(--color-surface);
+  padding: var(--space-5);
+  min-width: 0;
+}
+
+.tileHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.sectionTitle {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+.sectionHelp {
+  margin-top: var(--space-2);
+  color: var(--color-text-secondary);
+}
+
+/* Role matrix */
+.matrixScroll {
+  overflow-x: auto;
+}
+
+.matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-md);
+}
+
+.matrix th,
+.matrix td {
+  height: 48px;
+  padding: 0 var(--space-5);
+  text-align: left;
+  white-space: nowrap;
+  border-top: 1px solid var(--color-border);
+}
+
+.matrix thead th {
+  background: var(--color-selected);
+  border-top: none;
+  font-weight: var(--weight-semibold);
+}
+
+.matrix tbody th {
+  font-weight: var(--weight-regular);
+  color: var(--color-text-primary);
+}
+
+.matrix td {
+  color: var(--color-text-secondary);
+}
+
+.flagRow th,
+.flagRow td {
+  background: var(--color-background);
+}
+
+.yes {
+  color: var(--color-success-tag-text);
+  font-weight: var(--weight-semibold);
+}
+
+/* Role editor */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 32px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: var(--color-layer-hover);
+}
+
+.chipSelected,
+.chipSelected:hover {
+  background: var(--color-text-primary);
+  border-color: var(--color-text-primary);
+  color: var(--color-text-on-color);
+}
+
+.chipCount {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-gray-tag-bg);
+  color: var(--color-gray-tag-text);
+  font-size: var(--text-xs);
+}
+
+.chipSelected .chipCount {
+  background: var(--color-text-secondary);
+  color: var(--color-text-on-color);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin-top: var(--space-6);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--color-border);
+}
+
+.levelGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-5);
+}
+
+.editorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+  width: 100%;
+}
+
+@media (max-width: 1055px) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 671px) {
+  .formGrid,
+  .filters {
+    grid-template-columns: 1fr;
+  }
+  .filterField,
+  .searchField {
+    flex: 1 1 100%;
+  }
+  .toolbarEnd {
+    margin-left: 0;
+    width: 100%;
+  }
+  .toolbarEnd > * {
+    width: 100%;
+  }
+  .chip {
+    min-height: var(--touch-target);
+  }
+}

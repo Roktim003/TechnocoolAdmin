@@ -1,0 +1,94 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--button-height);
+  padding: 0 var(--space-9) 0 var(--space-5);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
+  line-height: 1.29;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 70ms ease, border-color 70ms ease, color 70ms ease;
+}
+
+.button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+}
+
+.primary {
+  background: var(--color-primary);
+  color: var(--color-text-on-color);
+}
+.primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+.primary:active:not(:disabled) {
+  background: var(--color-primary-active);
+}
+.primary:disabled {
+  background: var(--color-disabled-bg);
+  color: var(--color-text-disabled);
+}
+
+.secondary {
+  background: transparent;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.secondary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  color: var(--color-text-on-color);
+}
+
+.danger {
+  background: transparent;
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+.danger:hover:not(:disabled) {
+  background: var(--color-error-hover);
+  border-color: var(--color-error-hover);
+  color: var(--color-text-on-color);
+}
+
+.secondary:disabled,
+.danger:disabled {
+  border-color: var(--color-disabled-bg);
+  color: var(--color-text-disabled);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--color-primary);
+  padding: 0 var(--space-5);
+}
+.ghost:hover:not(:disabled) {
+  background: var(--color-layer-hover);
+  color: var(--color-primary-hover);
+}
+.ghost:disabled {
+  color: var(--color-text-disabled);
+}
+
+.sm {
+  min-height: var(--button-height-sm);
+  padding: 0 var(--space-4);
+  font-size: var(--text-md);
+}
+
+@media (max-width: 671px) {
+  .button {
+    min-height: var(--touch-target);
+  }
+}

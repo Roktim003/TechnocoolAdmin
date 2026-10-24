@@ -1,0 +1,127 @@
+# Local stack: app + worker + PostgreSQL + Redis + MinIO (S3-compatible storage).
+#   docker compose up --build
+# Then open http://localhost:3000 (login with ADMIN_USERNAME / ADMIN_PASSWORD below).
+
+x-app-env: &app-env
+  NODE_ENV: production
+  APP_URL: ${APP_URL:-http://localhost:3000}
+  TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+  TRUST_PROXY: "false"
+  TZ: Asia/Dhaka
+  DATABASE_URL: postgresql://stockbook:stockbook@postgres:5432/stockbook?schema=public
+  REDIS_URL: redis://redis:6379
+  REDIS_KEY_PREFIX: "sb:"
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-local-dev-access-secret-change-me-0123456789}
+  REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-local-dev-refresh-secret-change-me-0123456789}
+  JWT_ISSUER: stockbook
+  ACCESS_TOKEN_TTL_SECONDS: "900"
+  REFRESH_TOKEN_TTL_DAYS: "30"
+  # Plain http on localhost, so cookies cannot be Secure here. Use true behind HTTPS.
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  LOGIN_MAX_FAILURES: "5"
+  LOGIN_FAILURE_WINDOW_SECONDS: "900"
+  BCRYPT_ROUNDS: "12"
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+  ADMIN_NAME: ${ADMIN_NAME:-System Administrator}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  S3_ENDPOINT: http://minio:9000
+  S3_REGION: us-east-1
+  S3_BUCKET: stockbook
+  S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+  S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  S3_FORCE_PATH_STYLE: "true"
+  S3_AUTO_CREATE_BUCKET: "true"
+  # Email: Mailpit catches every email locally (inbox at http://localhost:8025).
+  SMTP_HOST: ${SMTP_HOST:-mailpit}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_SECURE: ${SMTP_SECURE:-false}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-StockBook <no-reply@stockbook.local>}
+  COMPANY_NAME: ${COMPANY_NAME:-StockBook}
+
+name: stockbook
+
+services:
+  app:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    image: stockbook:local
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS: "true"
+      SERVICE_NAME: stockbook-app
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    restart: unless-stopped
+
+  worker:
+    image: stockbook:local
+    command: ["node", "dist/worker.js"]
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS: "false"
+      SERVICE_NAME: stockbook-worker
+    depends_on:
+      app: { condition: service_started }
+      redis: { condition: service_healthy }
+    healthcheck: { disable: true }
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: stockbook
+      POSTGRES_PASSWORD: stockbook
+      POSTGRES_DB: stockbook
+      TZ: Asia/Dhaka
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockbook -d stockbook"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Private S3-compatible storage for product photos (MinIO, Bitnami build: the upstream
+  # minio/minio image is no longer published). Console: http://localhost:9001
+  minio:
+    image: bitnamilegacy/minio:2025.7.23
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [miniodata:/bitnami/minio/data]
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # Local SMTP catcher for notification emails. Inbox: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.21.8
+    ports: ["8025:8025", "1025:1025"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

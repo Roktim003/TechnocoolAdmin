@@ -1,0 +1,115 @@
+/*
+ * StockBook design tokens (Carbon-style). Every colour, size and font used by the UI
+ * comes from here — components reference these variables only.
+ */
+:root {
+  /* Typography */
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-base: 16px;
+  --text-page-title: 28px;
+  --weight-regular: 400;
+  --weight-semibold: 600;
+  --line-height: 1.43;
+
+  /* Surfaces & text */
+  --color-background: #f4f4f4;
+  --color-surface: #ffffff;
+  --color-field: #f4f4f4;
+  --color-field-hover: #e8e8e8;
+  --color-text-primary: #161616;
+  --color-text-secondary: #525252;
+  --color-text-muted: #393939;
+  --color-text-placeholder: #a8a8a8;
+  --color-text-on-color: #ffffff;
+  --color-text-disabled: #8d8d8d;
+  --color-border: #e0e0e0;
+  --color-border-strong: #8d8d8d;
+  --color-layer-hover: #e8e8e8;
+  --color-selected: #e0e0e0;
+  --color-overlay: rgba(22, 22, 22, 0.5);
+
+  /* Interactive */
+  --color-primary: #0f62fe;
+  --color-primary-hover: #0353e9;
+  --color-primary-active: #002d9c;
+  --color-focus: #0f62fe;
+  --focus-ring: 2px solid var(--color-focus);
+  --color-disabled-bg: #c6c6c6;
+
+  /* Status */
+  --color-success: #24a148;
+  --color-success-tag-bg: #a7f0ba;
+  --color-success-tag-text: #0e6027;
+  --color-success-notification-bg: #defbe6;
+  --color-error: #da1e28;
+  --color-error-hover: #b81921;
+  --color-error-tag-bg: #ffd7d9;
+  --color-error-tag-text: #a2191f;
+  --color-error-notification-bg: #fff1f1;
+  --color-warning: #f1c21b;
+  --color-warning-tag-bg: #fcf4d6;
+  --color-warning-tag-text: #684e00;
+  --color-warning-notification-bg: #fcf4d6;
+  --color-info: #0043ce;
+  --color-info-bg: #edf5ff;
+  --color-purple-tag-bg: #e8daff;
+  --color-purple-tag-text: #6929c4;
+  --color-gray-tag-bg: #e0e0e0;
+  --color-gray-tag-text: #161616;
+
+  /* UI shell */
+  --shell-header-height: 48px;
+  --shell-header-bg: #161616;
+  --shell-header-text: #f4f4f4;
+  --shell-header-text-secondary: #c6c6c6;
+  --shell-header-hover: #353535;
+  --shell-header-border: #393939;
+  --shell-search-bg: #262626;
+  --shell-nav-width: 256px;
+  --shell-nav-bg: #ffffff;
+  --shell-nav-item-height: 40px;
+  --shell-nav-active-bg: #e0e0e0;
+  --shell-nav-active-border: 3px solid #0f62fe;
+
+  /* Controls */
+  --button-height: 48px;
+  --button-height-sm: 32px;
+  --field-height: 40px;
+  --touch-target: 44px;
+  --radius: 0;
+  --radius-pill: 999px;
+  --tab-border: 2px solid #e0e0e0;
+  --tab-border-selected: 2px solid #0f62fe;
+  --switcher-border: 1px solid #161616;
+
+  /* Spacing (Carbon 2x grid) */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+
+  /* Breakpoints (reference only — CSS can't use vars in media queries): sm 672px, md 1056px */
+}
+
+/* Charts: Carbon data-visualisation palette (categorical order) and chart chrome. */
+:root {
+  --chart-1: #6929c4;
+  --chart-2: #1192e8;
+  --chart-3: #005d5d;
+  --chart-4: #9f1853;
+  --chart-5: #fa4d56;
+  --chart-6: #570408;
+  --chart-7: #198038;
+  --chart-8: #002d9c;
+  --chart-axis: #525252;
+  --chart-grid: #e0e0e0;
+}

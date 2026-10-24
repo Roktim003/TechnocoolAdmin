@@ -1,0 +1,138 @@
+.wrap {
+  position: relative;
+  display: flex;
+}
+
+.bell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--shell-header-height);
+  border: none;
+  background: transparent;
+  color: var(--shell-header-text);
+  cursor: pointer;
+}
+
+.bell:hover {
+  background: var(--shell-header-hover);
+}
+
+.bell:focus-visible {
+  outline: 2px solid var(--shell-header-text);
+  outline-offset: -2px;
+}
+
+.badge {
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--color-error);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  line-height: 16px;
+  text-align: center;
+}
+
+.panel {
+  position: absolute;
+  z-index: 50;
+  top: 100%;
+  right: 0;
+  width: min(380px, calc(100vw - 16px));
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 30%);
+}
+
+.head,
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.foot {
+  border-top: 1px solid var(--color-border);
+  border-bottom: none;
+  font-size: var(--text-sm);
+}
+
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.link:disabled {
+  color: var(--color-text-disabled);
+  cursor: default;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-4) var(--space-5);
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--color-layer-hover);
+}
+
+.unread {
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.unread .title {
+  font-weight: var(--weight-semibold);
+}
+
+.title {
+  font-size: var(--text-md);
+}
+
+.body {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.time {
+  color: var(--color-text-placeholder);
+  font-size: var(--text-xs);
+}
+
+.empty {
+  padding: var(--space-6) var(--space-5);
+  color: var(--color-text-secondary);
+  text-align: center;
+}

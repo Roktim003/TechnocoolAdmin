@@ -1,0 +1,274 @@
+/* Counting screen: built for phones first (large targets, one column). */
+
+.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.scan {
+  width: 100%;
+  height: 56px;
+  padding: 0 var(--space-5);
+  border: none;
+  border-bottom: 2px solid var(--color-border-strong);
+  background: var(--color-field);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 18px;
+}
+
+.scan:focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.progress {
+  height: 8px;
+  background: var(--color-field);
+  overflow: hidden;
+}
+
+.progressBar {
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.2s;
+}
+
+.progressText {
+  display: flex;
+  justify-content: space-between;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.filters {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+}
+
+.filter {
+  flex: none;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.filterOn {
+  border-color: var(--color-text-primary);
+  background: var(--color-text-primary);
+  color: var(--color-text-on-color);
+}
+
+.lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.line {
+  padding: var(--space-4);
+  border-left: 4px solid transparent;
+  background: var(--color-surface);
+}
+
+.lineCounted {
+  border-left-color: var(--color-success-tag-text);
+}
+
+.lineRecount {
+  border-left-color: var(--color-error);
+}
+
+.lineActive {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.lineHead {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.lineName {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+.meta {
+  margin-top: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.qtyRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.step {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.qty {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  padding: 0 var(--space-4);
+  border: none;
+  border-bottom: 2px solid var(--color-border-strong);
+  background: var(--color-field);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.qty:focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.saveRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.status {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.serialInput {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.serialInput input {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+}
+
+.serialList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.serial {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.serialFound {
+  border-color: var(--color-success-tag-text);
+}
+
+.serialMissing {
+  border-color: var(--color-error);
+  color: var(--color-error);
+  text-decoration: line-through;
+}
+
+.serialUnexpected {
+  border-color: var(--color-purple-tag-text);
+  color: var(--color-purple-tag-text);
+}
+
+.serial button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.bottomBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  box-shadow: 0 -1px 0 var(--color-border);
+}
+
+.reviewTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.reviewTable th,
+.reviewTable td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.reviewTable th {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}
+
+.right {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 672px) {
+  .hideSm {
+    display: none;
+  }
+}

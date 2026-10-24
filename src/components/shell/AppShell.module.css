@@ -1,0 +1,228 @@
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 200;
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-primary);
+  color: var(--color-text-on-color);
+}
+
+.skip:focus {
+  left: 0;
+}
+
+/* ── Header (UI shell) ── */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: stretch;
+  height: var(--shell-header-height);
+  background: var(--shell-header-bg);
+  color: var(--shell-header-text);
+  border-bottom: 1px solid var(--shell-header-border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-5);
+  color: var(--shell-header-text);
+  text-decoration: none;
+  font-size: var(--text-md);
+  white-space: nowrap;
+}
+
+.brand strong {
+  font-weight: var(--weight-semibold);
+}
+
+.brand:focus-visible,
+.logout:focus-visible {
+  outline: 2px solid var(--shell-header-text);
+  outline-offset: -2px;
+}
+
+.search {
+  flex: 1;
+  display: flex;
+  max-width: 480px;
+  min-width: 0;
+}
+
+.searchInput {
+  width: 100%;
+  border: none;
+  background: var(--shell-search-bg);
+  color: var(--shell-header-text);
+  padding: 0 var(--space-5);
+  font-size: var(--text-md);
+}
+
+.searchInput::placeholder {
+  color: var(--shell-header-text-secondary);
+}
+
+.searchInput:focus {
+  outline: 2px solid var(--shell-header-text);
+  outline-offset: -2px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.actions {
+  display: flex;
+  align-items: stretch;
+  margin-left: auto;
+}
+
+.user {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 var(--space-5);
+  line-height: 1.2;
+  text-align: right;
+}
+
+.userName {
+  font-size: var(--text-md);
+}
+
+.userRole {
+  font-size: var(--text-xs);
+  color: var(--shell-header-text-secondary);
+}
+
+.logout {
+  min-width: var(--shell-header-height);
+  padding: 0 var(--space-5);
+  border: none;
+  background: transparent;
+  color: var(--shell-header-text);
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+.logout:hover {
+  background: var(--shell-header-hover);
+}
+
+/* ── Body: side nav + content ── */
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.nav {
+  flex: none;
+  width: var(--shell-nav-width);
+  background: var(--shell-nav-bg);
+  border-right: 1px solid var(--color-border);
+  padding: var(--space-5) 0;
+}
+
+.navList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: sticky;
+  top: calc(var(--shell-header-height) + var(--space-5));
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  min-height: var(--shell-nav-item-height);
+  padding: 0 var(--space-5);
+  border-left: 3px solid transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+
+.navItem:hover {
+  background: var(--color-layer-hover);
+  color: var(--color-text-primary);
+}
+
+.navActive,
+.navActive:hover {
+  background: var(--shell-nav-active-bg);
+  border-left: var(--shell-nav-active-border);
+  color: var(--color-text-primary);
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-7);
+}
+
+.refreshing {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  color: var(--color-text-secondary);
+}
+
+/* ── Phone: nav stacks above content ── */
+@media (max-width: 671px) {
+  .user {
+    display: none;
+  }
+
+  .search {
+    max-width: none;
+  }
+
+  .body {
+    flex-direction: column;
+  }
+
+  .nav {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    padding: 0;
+  }
+
+  .navList {
+    position: static;
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .navItem {
+    min-height: var(--touch-target);
+    white-space: nowrap;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+  }
+
+  .navActive,
+  .navActive:hover {
+    border-left: none;
+    border-bottom: var(--shell-nav-active-border);
+  }
+
+  .logout {
+    min-height: var(--touch-target);
+  }
+
+  .main {
+    padding: var(--space-5);
+  }
+}
