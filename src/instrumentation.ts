@@ -1,7 +1,7 @@
-/** Next.js server start-up hook: wires the modules once per server process (Node.js runtime only). */
+/** Next.js server start-up hook. The Node-only work lives in instrumentation-node.ts (kept out of the edge bundle). */
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { wireModules } = await import("./modules/bootstrap");
-    wireModules();
+    const { startWebServer } = await import("./instrumentation-node");
+    await startWebServer();
   }
 }

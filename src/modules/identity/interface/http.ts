@@ -1,7 +1,9 @@
 import type { ActorContext } from "@/modules/audit/application/audit.service";
 import { authCookies, clearAuthCookies, REFRESH_COOKIE } from "@/shared/auth/cookies";
 import { assertSameOrigin } from "@/shared/auth/csrf";
+import { env } from "@/shared/config/env";
 import { NotFoundError } from "@/shared/errors/app-error";
+import { enforceRateLimit } from "@/shared/http/rate-limit";
 import { authedRoute, publicRoute, withResponseCookies, type AuthedContext, type BaseContext } from "@/shared/http/route";
 import { pageMeta } from "@/shared/pagination/list-query";
 import { UuidSchema } from "@/shared/validation/zod";
@@ -64,6 +66,8 @@ export const authHandlers = {
   }),
 
   refresh: publicRoute(async (ctx) => {
+    // Per client IP: refresh needs no session, so it is limited before any token lookup.
+    await enforceRateLimit({ bucket: "refresh", subject: ctx.ip ?? "unknown", limit: env().RATE_LIMIT_REFRESH_PER_MINUTE });
     const { token, viaCookie } = await presentedRefreshToken(ctx);
     if (!token) throw IdentityErrors.refreshInvalid();
     try {
@@ -124,6 +128,10 @@ export const userHandlers = {
     const id = idParam(ctx, "User");
     const { password } = await ctx.body(SetPasswordSchema);
     return { data: toUserDto(await identity().users.setPassword(actor(ctx), id, password)) };
+  }),
+
+  logoutAll: authedRoute<IdParams>(USERS_ADMIN, async (ctx) => {
+    return { data: await identity().users.logoutAllDevices(actor(ctx), idParam(ctx, "User")) };
   }),
 };
 

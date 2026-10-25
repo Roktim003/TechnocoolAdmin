@@ -35,7 +35,7 @@ export interface NotificationStore {
   /** Active users among the ids, with their email address. */
   recipients(userIds: string[]): Promise<Recipient[]>;
   createEmailLog(data: { to: string; subject: string; type: string | null }): Promise<string>;
-  updateEmailLog(id: string, data: { status?: "QUEUED" | "SENT" | "FAILED" | "SKIPPED"; attempts?: number; error?: string | null; sentAt?: Date | null }): Promise<void>;
+  updateEmailLog(id: string, data: { status?: "QUEUED" | "SENT" | "FAILED" | "NOT_SENT_SMTP_MISSING"; attempts?: number; error?: string | null; sentAt?: Date | null }): Promise<void>;
 }
 
 /** Who should hear about something (active users only). */
@@ -78,7 +78,7 @@ export interface EmailQueue {
 }
 
 export interface Mailer {
-  /** False when SMTP isn't configured: emails are logged as SKIPPED. */
+  /** False when SMTP isn't configured: emails are logged as NOT_SENT_SMTP_MISSING. */
   readonly configured: boolean;
   send(message: EmailMessage, files?: EmailFile[]): Promise<void>;
 }

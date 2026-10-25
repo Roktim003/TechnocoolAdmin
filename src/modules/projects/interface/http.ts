@@ -163,7 +163,7 @@ export const projectHandlers = {
   }),
 
   /* documents */
-  costStatement: authedRoute<IdParams>(VIEW, async (ctx) => {
+  costStatement: authedRoute<IdParams>({ ...VIEW, rateLimit: "exports" }, async (ctx) => {
     const a = actorOf(ctx);
     if (!a.canSeeCost) throw ProjectErrors.costHidden();
     const projectId = id(ctx);

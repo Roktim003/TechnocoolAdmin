@@ -87,11 +87,12 @@ export class NotificationService {
 export class EmailSender {
   constructor(private readonly d: { store: NotificationStore; mailer: () => Mailer; loadFile?: (key: string) => Promise<{ body: Uint8Array } | null> }) {}
 
-  async send(job: EmailJob, attempt: number, maxAttempts: number): Promise<"SENT" | "SKIPPED"> {
+  async send(job: EmailJob, attempt: number, maxAttempts: number): Promise<"SENT" | "NOT_SENT_SMTP_MISSING"> {
     const mailer = this.d.mailer();
     if (!mailer.configured) {
-      await this.d.store.updateEmailLog(job.emailLogId, { status: "SKIPPED", attempts: attempt, error: "SMTP is not configured (SMTP_HOST is empty)." });
-      return "SKIPPED";
+      // Email is not set up yet: keep the log row (the email can be read on System health) and don't retry.
+      await this.d.store.updateEmailLog(job.emailLogId, { status: "NOT_SENT_SMTP_MISSING", attempts: attempt, error: "Email is not set up yet (SMTP_HOST is empty)." });
+      return "NOT_SENT_SMTP_MISSING";
     }
     try {
       const files: EmailFile[] = [];

@@ -112,7 +112,7 @@ export const productHandlers = {
     return { data: items.map(toAuditLogDto), meta: pageMeta(total, query.page, query.pageSize) };
   }),
 
-  export: authedRoute(FULL, async (ctx) => {
+  export: authedRoute({ ...FULL, rateLimit: "exports" }, async (ctx) => {
     const query = ctx.query(ProductListQuerySchema);
     const bytes = await catalog().imports.export(actor(ctx), { filters: query.filters, q: query.q, sort: query.sort });
     return { file: { body: bytes, contentType: XLSX, filename: `products-${stamp()}.xlsx` } };

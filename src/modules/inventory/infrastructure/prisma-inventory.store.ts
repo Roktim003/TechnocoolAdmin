@@ -283,6 +283,13 @@ export function prismaInventoryStore(db: Db): InventoryStore {
     async updateLine(lineId, data) {
       await db.stockEntryLine.update({ where: { id: lineId }, data });
     },
+    async updateLineCosts(rows) {
+      if (!rows.length) return;
+      const values = Prisma.join(rows.map((r) => Prisma.sql`(${r.lineId}::uuid, ${r.unitCostBdt}::numeric, ${r.landedUnitCost}::numeric, ${r.amount}::numeric, ${r.costAmount}::numeric)`));
+      await db.$executeRaw`
+        UPDATE "StockEntryLine" l SET "unitCostBdt" = v.u, "landedUnitCost" = v.lu, "amount" = v.am, "costAmount" = v.ca
+        FROM (VALUES ${values}) AS v(id, u, lu, am, ca) WHERE l.id = v.id`;
+    },
     async updateCharge(chargeId, amountBdt) {
       await db.landedCostCharge.update({ where: { id: chargeId }, data: { amountBdt } });
     },
@@ -337,17 +344,22 @@ export function prismaInventoryStore(db: Db): InventoryStore {
     /* ── stock (locking) ── */
     async lockCosts(productIds) {
       const ids = [...new Set(productIds)].sort();
-      await db.productCost.createMany({ data: ids.map((productId) => ({ productId })), skipDuplicates: true });
       const out = new Map<string, { totalQty: string; totalValue: string; avgCost: string }>();
-      for (const id of ids) {
-        const [r] = await db.$queryRaw<{ totalQty: Prisma.Decimal; totalValue: Prisma.Decimal; avgCost: Prisma.Decimal }[]>`
-          SELECT "totalQty", "totalValue", "avgCost" FROM "ProductCost" WHERE "productId" = ${id}::uuid FOR UPDATE`;
-        out.set(id, { totalQty: q3(r!.totalQty), totalValue: m2(r!.totalValue), avgCost: c4(r!.avgCost) });
-      }
+      if (!ids.length) return out;
+      await db.productCost.createMany({ data: ids.map((productId) => ({ productId })), skipDuplicates: true });
+      // One statement; ORDER BY makes PostgreSQL lock the rows in key order (LockRows runs above the sort).
+      const rows = await db.$queryRaw<{ productId: string; totalQty: Prisma.Decimal; totalValue: Prisma.Decimal; avgCost: Prisma.Decimal }[]>`
+        SELECT "productId"::text AS "productId", "totalQty", "totalValue", "avgCost" FROM "ProductCost"
+        WHERE "productId" = ANY(${ids}::uuid[]) ORDER BY "productId" FOR UPDATE`;
+      for (const r of rows) out.set(r.productId, { totalQty: q3(r.totalQty), totalValue: m2(r.totalValue), avgCost: c4(r.avgCost) });
       return out;
     },
-    async saveCost(productId, s) {
-      await db.productCost.update({ where: { productId }, data: { totalQty: s.totalQty, totalValue: s.totalValue, avgCost: s.avgCost } });
+    async saveCosts(rows) {
+      if (!rows.length) return;
+      const values = Prisma.join(rows.map((r) => Prisma.sql`(${r.productId}::uuid, ${r.state.totalQty}::numeric, ${r.state.totalValue}::numeric, ${r.state.avgCost}::numeric)`));
+      await db.$executeRaw`
+        UPDATE "ProductCost" c SET "totalQty" = v.q, "totalValue" = v.val, "avgCost" = v.a, "updatedAt" = now() AT TIME ZONE 'UTC'
+        FROM (VALUES ${values}) AS v(id, q, val, a) WHERE c."productId" = v.id`;
     },
     async costs(productIds) {
       const rows = await db.productCost.findMany({ where: { productId: { in: [...new Set(productIds)] } } });
@@ -357,14 +369,14 @@ export function prismaInventoryStore(db: Db): InventoryStore {
       const sorted = sortKeys(keys);
       if (!sorted.length) return new Map();
       await db.stockBalance.createMany({ data: sorted.map((k) => ({ productId: k.productId, warehouseId: k.warehouseId, condition: k.condition })), skipDuplicates: true });
+      const wanted = Prisma.join(sorted.map((k) => Prisma.sql`(${k.productId}::uuid, ${k.warehouseId}::uuid, ${k.condition}::"StockCondition")`));
+      // One statement, rows locked in sortKeys order (uuid order = lower-case string order; condition as text).
+      const rows = await db.$queryRaw<{ productId: string; warehouseId: string; condition: BalanceKey["condition"]; qtyOnHand: Prisma.Decimal; qtyReserved: Prisma.Decimal }[]>`
+        SELECT "productId"::text AS "productId", "warehouseId"::text AS "warehouseId", "condition"::text AS "condition", "qtyOnHand", "qtyReserved"
+        FROM "StockBalance" WHERE ("productId", "warehouseId", "condition") IN (VALUES ${wanted})
+        ORDER BY "productId", "warehouseId", "condition"::text FOR UPDATE`;
       const out = new Map<string, BalanceRow>();
-      for (const k of sorted) {
-        const [r] = await db.$queryRaw<{ qtyOnHand: Prisma.Decimal; qtyReserved: Prisma.Decimal }[]>`
-          SELECT "qtyOnHand", "qtyReserved" FROM "StockBalance"
-          WHERE "productId" = ${k.productId}::uuid AND "warehouseId" = ${k.warehouseId}::uuid AND "condition" = ${k.condition}::"StockCondition"
-          FOR UPDATE`;
-        out.set(balanceKey(k), { ...k, qtyOnHand: q3(r!.qtyOnHand), qtyReserved: q3(r!.qtyReserved) });
-      }
+      for (const r of rows) out.set(balanceKey(r), { productId: r.productId, warehouseId: r.warehouseId, condition: r.condition, qtyOnHand: q3(r.qtyOnHand), qtyReserved: q3(r.qtyReserved) });
       return out;
     },
     async balances(keys: BalanceKey[]) {
@@ -372,11 +384,13 @@ export function prismaInventoryStore(db: Db): InventoryStore {
       const rows = await db.stockBalance.findMany({ where: { OR: keys.map((k) => ({ productId: k.productId, warehouseId: k.warehouseId, condition: k.condition })) } });
       return new Map(rows.map((r) => [balanceKey(r), { productId: r.productId, warehouseId: r.warehouseId, condition: r.condition, qtyOnHand: q3(r.qtyOnHand), qtyReserved: q3(r.qtyReserved) }]));
     },
-    async saveBalance(row) {
-      await db.stockBalance.update({
-        where: { productId_warehouseId_condition: { productId: row.productId, warehouseId: row.warehouseId, condition: row.condition } },
-        data: { qtyOnHand: row.qtyOnHand, qtyReserved: row.qtyReserved },
-      });
+    async saveBalances(rows) {
+      if (!rows.length) return;
+      const values = Prisma.join(rows.map((r) => Prisma.sql`(${r.productId}::uuid, ${r.warehouseId}::uuid, ${r.condition}::"StockCondition", ${r.qtyOnHand}::numeric, ${r.qtyReserved}::numeric)`));
+      await db.$executeRaw`
+        UPDATE "StockBalance" b SET "qtyOnHand" = v.h, "qtyReserved" = v.r, "updatedAt" = now() AT TIME ZONE 'UTC'
+        FROM (VALUES ${values}) AS v(p, w, c, h, r)
+        WHERE b."productId" = v.p AND b."warehouseId" = v.w AND b."condition" = v.c`;
     },
     async reservations(entryId) {
       const rows = await db.stockReservation.findMany({ where: { entryId } });
@@ -542,9 +556,21 @@ export function prismaInventoryStore(db: Db): InventoryStore {
       });
       return rows.map((r) => ({ entryId: r.transfer.id, number: r.transfer.number, fromCode: r.transfer.warehouse.code, toCode: r.transfer.toWarehouse?.code ?? "", qty: q3(r.qty) }));
     },
-    async listSerials(q) {
+    async listSerials(q, scope) {
       const f = q.filters;
+      const inScope: Prisma.SerialNumberWhereInput | undefined = scope
+        ? {
+            OR: [
+              { warehouseId: { in: scope } },
+              {
+                warehouseId: null,
+                movements: { some: { OR: [{ fromWarehouseId: { in: scope } }, { entry: { warehouseId: { in: scope } } }, { entry: { toWarehouseId: { in: scope } } }] } },
+              },
+            ],
+          }
+        : undefined;
       const where: Prisma.SerialNumberWhereInput = {
+        ...(inScope ?? {}),
         ...(f.productId ? { productId: f.productId } : {}),
         ...(f.warehouseId ? { warehouseId: f.warehouseId } : {}),
         ...(f.status ? { status: f.status as never } : {}),

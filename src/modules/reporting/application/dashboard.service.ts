@@ -95,10 +95,16 @@ export class DashboardService {
 
   async build(v: ReportViewer): Promise<{ widgets: Widget[]; cached: boolean; generatedAt: string }> {
     const key = this.cacheKey(v);
-    let shared = await this.d.cache.get<{ widgets: Widget[]; generatedAt: string }>(key);
+    const [hit, changedAt] = await Promise.all([this.d.cache.get<{ widgets: Widget[]; generatedAt: string }>(key), this.d.cache.changedAt()]);
+    let shared = hit;
+    // Data changed since it was computed: the first reader recomputes; readers arriving meanwhile
+    // get the previous widgets instead of all recomputing at once (postings arrive several a second).
+    if (hit && Date.parse(hit.generatedAt) <= changedAt && (await this.d.cache.claimRefresh(key))) shared = null;
     const cached = !!shared;
     if (!shared) {
-      shared = { widgets: await this.sharedWidgets(v), generatedAt: (this.d.now?.() ?? new Date()).toISOString() };
+      // Stamped before computing, so a change made during the computation marks it stale.
+      const generatedAt = (this.d.now?.() ?? new Date()).toISOString();
+      shared = { widgets: await this.sharedWidgets(v), generatedAt };
       await this.d.cache.set(key, shared, CACHE_TTL_SECONDS);
     }
     const personal = await this.personalWidgets(v);

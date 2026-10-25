@@ -1,4 +1,4 @@
-import { healthHandler } from "@/shared/http/health";
+import { livenessHandler } from "@/shared/http/health";
 
 export const dynamic = "force-dynamic";
-export const GET = healthHandler;
+export const GET = livenessHandler;

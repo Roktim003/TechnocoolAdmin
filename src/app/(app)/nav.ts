@@ -22,6 +22,8 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/projects", label: "Projects", module: "projects", min: "VIEW" },
   { href: "/reports", label: "Reports", module: "reports", min: "VIEW" },
   { href: "/users", label: "Users & roles", module: "users", min: "FULL" },
+  { href: "/admin/system", label: "System health", module: "users", min: "FULL" },
+  { href: "/admin/jobs", label: "Background jobs", module: "users", min: "FULL" },
 ];
 
 export function visibleNav(permissions: PermissionMap): NavItem[] {

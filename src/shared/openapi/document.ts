@@ -11,15 +11,16 @@ import "@/modules/notifications/interface/openapi";
 import "@/modules/purchasing/interface/openapi";
 import "@/modules/projects/interface/openapi";
 import "@/modules/reporting/interface/openapi";
+import "@/modules/system/interface/openapi";
 
 registry.registerPath({
   method: "get",
   path: "/health",
   tags: ["System"],
-  summary: "Liveness / readiness: checks PostgreSQL and Redis",
+  summary: "Liveness: the web process is up",
+  description: "No dependencies are checked (see /health/ready). Used by the container HEALTHCHECK.",
   responses: {
-    200: json(z.object({ data: z.object({ status: z.literal("ok"), checks: z.record(z.unknown()), time: z.string() }) })),
-    503: json(z.object({ data: z.object({ status: z.literal("degraded"), checks: z.record(z.unknown()), time: z.string() }) }), "A dependency is down"),
+    200: json(z.object({ data: z.object({ status: z.literal("ok"), version: z.string(), commit: z.string(), uptimeSeconds: z.number(), time: z.string() }) })),
   },
 });
 

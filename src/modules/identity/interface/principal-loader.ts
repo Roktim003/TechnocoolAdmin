@@ -12,6 +12,8 @@ export async function loadPrincipal(claims: AccessTokenClaims, method: Principal
   const store = identity().principalStore;
   const user = await store.getUser(claims.sub);
   if (!user || user.status !== "ACTIVE" || user.tokenVersion !== claims.tv) throw IdentityErrors.sessionRevoked();
+  // Web (cookie) sessions end after the idle timeout; every request extends them.
+  if (method === "cookie") await identity().auth.touchWebSession(claims.sid);
 
   const role = await store.getRole(user.roleId);
   if (!role) throw IdentityErrors.sessionRevoked();

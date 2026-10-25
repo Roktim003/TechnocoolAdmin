@@ -28,6 +28,8 @@ export interface UserRepository {
   setStatus(id: string, status: UserStatus): Promise<UserDetail>;
   /** Stores a new hash, clears the lock and bumps tokenVersion. */
   setPassword(id: string, passwordHash: string): Promise<UserDetail>;
+  /** Bumps tokenVersion: every access token issued so far stops working. */
+  revokeSessions(id: string): Promise<void>;
   lock(id: string, at: Date): Promise<void>;
   recordLogin(id: string, at: Date): Promise<void>;
   /** Active users on a locked (Admin) role, optionally excluding one user. */
@@ -91,7 +93,7 @@ export interface RefreshTokenCodec {
 }
 
 export interface AccessTokenIssuer {
-  issue(claims: { sub: string; rid: string; pv: number; tv: number }): Promise<{ token: string; expiresIn: number }>;
+  issue(claims: { sub: string; rid: string; pv: number; tv: number; sid?: string }): Promise<{ token: string; expiresIn: number }>;
 }
 
 /** Counts failed logins per username within a sliding window (Redis). */
@@ -109,4 +111,16 @@ export interface PrincipalCache {
 export interface IdentityConfig {
   maxLoginFailures: number;
   refreshTokenTtlDays: number;
+  /** Retry-After for a rate-limited login. */
+  loginFailureWindowSeconds?: number;
+  /** Web sessions end after this many idle minutes (0 = never). */
+  sessionIdleMinutes?: number;
+}
+
+/** Last activity of web sessions (Redis key with a TTL of the idle timeout). */
+export interface SessionActivity {
+  start(sessionId: string, ttlSeconds: number): Promise<void>;
+  /** Extends the session; false when it already expired (idle too long). */
+  touch(sessionId: string, ttlSeconds: number): Promise<boolean>;
+  end(sessionId: string): Promise<void>;
 }

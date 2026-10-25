@@ -4,6 +4,7 @@
 // Module 3: opening import, stock counts, notifications, low-stock alerts.
 // Module 4: purchasing (suppliers, purchase orders, revisions; GRNs link to PO lines).
 // Module 5: projects (costs, status history). Module 6: reporting (scheduled report emails).
+// Module 7: operations (backup runs, restore tests, integrity checks; immutability triggers in SQL).
 // All ids are UUIDs; timestamps are stored in UTC (displayed as Asia/Dhaka).
 
 generator client {
@@ -1178,7 +1179,10 @@ enum EmailStatus {
   QUEUED
   SENT
   FAILED
+  /// Deprecated (Module 3 name). Kept for one release so the previous version keeps working; rows were moved to NOT_SENT_SMTP_MISSING.
   SKIPPED
+  /// SMTP is not set up yet: the email was queued and logged but not sent.
+  NOT_SENT_SMTP_MISSING
 }
 
 model EmailLog {
@@ -1415,4 +1419,73 @@ model ReportScheduleRun {
   schedule ReportSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
 
   @@index([scheduleId, startedAt])
+}
+
+// ─────────────────────────────── Module 7: operations ───────────────────────────────
+
+enum OpsTrigger {
+  SCHEDULED
+  MANUAL
+  PRE_MIGRATION
+}
+
+enum OpsRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+/// One database backup (pg_dump -Fc, encrypted when BACKUP_ENCRYPTION_KEY is set).
+model BackupRun {
+  id            String       @id @default(uuid()) @db.Uuid
+  trigger       OpsTrigger
+  status        OpsRunStatus @default(RUNNING)
+  fileName      String?
+  sizeBytes     BigInt?
+  encrypted     Boolean      @default(false)
+  /// Copied to the off-site bucket (BACKUP_S3_*).
+  offsite       Boolean      @default(false)
+  offsiteError  String?
+  error         String?
+  /// Retention, attachment sync and other details.
+  details       Json?
+  requestedById String?      @db.Uuid
+  startedAt     DateTime     @default(now())
+  finishedAt    DateTime?
+
+  @@index([startedAt])
+  @@index([status, startedAt])
+}
+
+/// Restores the latest backup into a temporary database and runs sanity checks on it.
+model RestoreTestRun {
+  id            String       @id @default(uuid()) @db.Uuid
+  trigger       OpsTrigger
+  status        OpsRunStatus @default(RUNNING)
+  backupFile    String?
+  /// Row counts, integrity results, latest entry date.
+  details       Json?
+  error         String?
+  requestedById String?      @db.Uuid
+  startedAt     DateTime     @default(now())
+  finishedAt    DateTime?
+
+  @@index([startedAt])
+}
+
+/// Nightly ledger integrity check. Reports problems, never fixes them.
+model IntegrityCheckRun {
+  id            String       @id @default(uuid()) @db.Uuid
+  trigger       OpsTrigger
+  status        OpsRunStatus @default(RUNNING)
+  /// true when every check passed.
+  passed        Boolean?
+  /// [{ key, label, passed, problems, details: [...] }]
+  checks        Json?
+  error         String?
+  requestedById String?      @db.Uuid
+  startedAt     DateTime     @default(now())
+  finishedAt    DateTime?
+
+  @@index([startedAt])
 }

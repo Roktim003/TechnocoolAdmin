@@ -29,6 +29,10 @@ export const NOTIFICATION_TYPES = [
   { key: "PROJECT_COST_ALERT", label: "Project cost near the contract value", description: "A project's total cost reached 90% or 100% of its contract value.", defaultEmail: true, inApp: true },
   { key: "PROJECT_STATUS_CHANGED", label: "Your project changed status", description: "A project you are the site engineer of was started, put on hold, completed, closed or reopened.", defaultEmail: false, inApp: true },
   { key: "REPORT_SCHEDULE_FAILED", label: "Scheduled report failed", description: "A scheduled report email could not run (for example its owner was disabled or lost access).", defaultEmail: true, inApp: true },
+  { key: "BACKUP_FAILED", label: "Backup failed", description: "A database backup, or its off-site copy, failed (Admins).", defaultEmail: true, inApp: true },
+  { key: "RESTORE_TEST_FAILED", label: "Restore test failed", description: "The monthly test restore of the latest backup failed its checks (Admins).", defaultEmail: true, inApp: true },
+  { key: "INTEGRITY_CHECK_FAILED", label: "Integrity check found problems", description: "The nightly ledger check found balances, costs or numbers that don't add up (Admins).", defaultEmail: true, inApp: true },
+  { key: "BACKGROUND_JOBS_FAILING", label: "Background jobs failing", description: "More background jobs failed in the last hour than the alert threshold (Admins).", defaultEmail: true, inApp: true },
   { key: "PO_OVERDUE_DIGEST", label: "Daily overdue purchase orders", description: "A 9:00 AM email listing purchase orders past their expected delivery date.", defaultEmail: true, inApp: false },
 ] as const satisfies readonly NotificationTypeDef[];
 

@@ -21,6 +21,9 @@ export type ErrorCode =
   | "BUSINESS_RULE"
   | "RATE_LIMITED"
   | "QUERY_TIMEOUT"
+  | "PAYLOAD_TOO_LARGE"
+  | "SESSION_IDLE"
+  | "SERVICE_UNAVAILABLE"
   | "INTERNAL_ERROR";
 
 export interface ErrorDetail {
@@ -85,7 +88,18 @@ export class BusinessRuleError extends AppError {
 }
 
 export class RateLimitError extends AppError {
-  constructor(message = "Too many requests. Please try again later.") {
+  constructor(
+    message = "Too many requests. Please try again later.",
+    /** Seconds until the client may retry (sent as Retry-After). */
+    readonly retryAfter = 60,
+  ) {
     super("RATE_LIMITED", 429, message);
+  }
+}
+
+/** The request body is larger than the configured limit (HTTP 413). */
+export class PayloadTooLargeError extends AppError {
+  constructor(limitBytes: number) {
+    super("PAYLOAD_TOO_LARGE", 413, `The request is too large (the limit is ${limitBytes >= 1048576 ? Math.round(limitBytes / 1048576) + " MB" : Math.round(limitBytes / 1024) + " KB"}).`);
   }
 }

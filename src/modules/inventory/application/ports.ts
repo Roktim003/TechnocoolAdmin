@@ -290,6 +290,8 @@ export interface InventoryStore {
   replaceEntry(id: string, data: EntryWrite): Promise<void>;
   updateEntry(id: string, data: Partial<Record<string, unknown>>): Promise<void>;
   updateLine(lineId: string, data: { unitCostBdt?: string; landedUnitCost?: string | null; amount?: string; costAmount?: string; unitPrice?: string; receivedQty?: string | null; originalLineId?: string | null }): Promise<void>;
+  /** The computed cost columns of many lines in one statement (posting / submit). */
+  updateLineCosts(rows: { lineId: string; unitCostBdt: string; landedUnitCost: string | null; amount: string; costAmount: string }[]): Promise<void>;
   updateCharge(chargeId: string, amountBdt: string): Promise<void>;
   /** Replaces an entry's landed-cost charges (pending import GRNs). */
   replaceCharges(entryId: string, charges: EntryWrite["charges"]): Promise<void>;
@@ -311,13 +313,14 @@ export interface InventoryStore {
   activeCount(warehouseId: string, productIds: string[]): Promise<{ id: string; number: string; productIds: string[] } | null>;
   openingLocked(warehouseId: string): Promise<boolean>;
 
-  // stock (locks are SELECT … FOR UPDATE; callers pass keys sorted)
+  // stock (locks are one SELECT … ORDER BY … FOR UPDATE, so rows are always locked in key order;
+  // saves write all rows in one statement — fewer round trips while the locks are held)
   lockCosts(productIds: string[]): Promise<Map<string, ProductCostState>>;
-  saveCost(productId: string, state: ProductCostState): Promise<void>;
+  saveCosts(rows: { productId: string; state: ProductCostState }[]): Promise<void>;
   costs(productIds: string[]): Promise<Map<string, ProductCostState>>;
   lockBalances(keys: BalanceKey[]): Promise<Map<string, BalanceRow>>;
   balances(keys: BalanceKey[]): Promise<Map<string, BalanceRow>>;
-  saveBalance(row: BalanceRow): Promise<void>;
+  saveBalances(rows: BalanceRow[]): Promise<void>;
   reservations(entryId: string): Promise<(BalanceKey & { qty: string })[]>;
   addReservations(entryId: string, rows: (BalanceKey & { qty: string })[]): Promise<void>;
   deleteReservations(entryId: string): Promise<void>;
@@ -341,7 +344,8 @@ export interface InventoryStore {
   stockLevels(q: ListQuery<BalanceFilters>, warehouseIds: string[]): Promise<{ items: StockLevelRow[]; total: number }>;
   movements(q: ListQuery<MovementFilters>, warehouseIds: string[]): Promise<{ items: MovementRecord[]; total: number }>;
   inTransitForProduct(productId: string, warehouseIds: string[]): Promise<{ entryId: string; number: string | null; fromCode: string; toCode: string; qty: string }[]>;
-  listSerials(q: ListQuery<SerialFilters>): Promise<{ items: (SerialRecord & { productCode: string; productName: string; warehouseCode: string | null; projectCode: string | null; customerName: string | null })[]; total: number }>;
+  /** scope: only serials in these warehouses, or out of stock after moving through one of them. */
+  listSerials(q: ListQuery<SerialFilters>, scope?: string[]): Promise<{ items: (SerialRecord & { productCode: string; productName: string; warehouseCode: string | null; projectCode: string | null; customerName: string | null })[]; total: number }>;
   serialHistory(id: string): Promise<{ id: string; at: Date; fromStatus: SerialStatus | null; toStatus: SerialStatus; entry: { id: string; number: string | null; type: EntryType }; fromWarehouse: string | null; toWarehouse: string | null }[]>;
 
   // attachments

@@ -1,19 +1,28 @@
 /**
  * BullMQ worker — runs as a separate process from the web app (same image, different command):
- *   node dist/worker.js        (production)
- *   npm run worker             (development)
+ *   docker: `worker`                 (node dist/worker.js)
+ *   dev:    npm run worker
+ *
+ * WORKER_QUEUES picks the queues this process consumes ("*" = all; "*,!backups" = all but
+ * backups; "backups" = only backups). In production the backup job runs as its own service
+ * (it needs pg_dump and the /backups volume); the main worker takes everything else.
  */
-import { Worker } from "bullmq";
+import { Worker, type Job } from "bullmq";
 import { env } from "@/shared/config/env";
 import { prisma } from "@/shared/db/prisma";
-import { logger } from "@/shared/logger/logger";
-import { bullConnection } from "@/shared/redis/redis";
-import { QUEUES, queuePrefix } from "@/shared/queue/queue";
+import { logger, type Logger } from "@/shared/logger/logger";
+import { bullConnection, redis } from "@/shared/redis/redis";
+import { closeQueues, QUEUES, queuePrefix } from "@/shared/queue/queue";
+import { startHeartbeat } from "@/shared/lifecycle/heartbeat";
+import { onShutdown, shutdown } from "@/shared/lifecycle/shutdown";
+import { captureError, flushErrorTracking, initErrorTracking } from "@/shared/monitoring/sentry";
 import { processSystemJob } from "./processors/system";
+import { selectQueues } from "./select-queues";
 import { processCatalogImportJob } from "@/modules/catalog/interface/import-jobs";
 import { processDocumentJob } from "@/modules/inventory/interface/documents";
 import { processAlertJob } from "@/modules/inventory/interface/events";
 import { ensureDigestSchedule, processOpeningImportJob } from "@/modules/inventory/interface/jobs";
+import { closePdfBrowser } from "@/modules/inventory/infrastructure/pdf";
 import { processEmailJob } from "@/modules/notifications/interface/container";
 import { wireModules } from "@/modules/bootstrap";
 import { PO_DOCUMENT_JOB, processPoDocumentJob } from "@/modules/purchasing/interface/documents";
@@ -21,93 +30,108 @@ import { ensurePoDigestSchedule, processPurchasingJob } from "@/modules/purchasi
 import { COST_STATEMENT_JOB, processCostStatementJob } from "@/modules/projects/interface/documents";
 import { processProjectsJob } from "@/modules/projects/interface/events";
 import { processReportJob, registerReportScheduler } from "@/modules/reporting/interface/container";
+import { OPS_JOBS, processOpsJob, registerOpsSchedules } from "@/modules/system/interface/container";
 
-const log = logger.child({ service: "worker" });
+const log = logger.child({ component: "worker" });
 
-function start() {
-  env(); // fail fast on bad configuration
+type Processor = (job: Job, log: Logger) => Promise<unknown>;
+
+/** Every queue, its processor and how many jobs run at once in one process. */
+const QUEUE_DEFS: { name: string; concurrency: number; processor: Processor }[] = [
+  { name: QUEUES.system, concurrency: 5, processor: (job, l) => (job.name === OPS_JOBS.failedJobsCheck ? processOpsJob(job, l) : processSystemJob(job, l)) },
+  // One import at a time: each commit is a single large transaction.
+  { name: QUEUES.catalogImport, concurrency: 1, processor: processCatalogImportJob },
+  // PDF rendering (headless Chromium, PDF_CONCURRENCY pages at once): stock documents, POs, project cost statements.
+  { name: QUEUES.documents, concurrency: 2, processor: (job, l) => (job.name === PO_DOCUMENT_JOB ? processPoDocumentJob : job.name === COST_STATEMENT_JOB ? processCostStatementJob : processDocumentJob)(job, l) },
+  // Opening-stock validation, one file at a time.
+  { name: QUEUES.openingImport, concurrency: 1, processor: processOpeningImportJob },
+  // Outgoing email; BullMQ retries failures with exponential backoff (EMAIL_MAX_ATTEMPTS).
+  { name: QUEUES.email, concurrency: 3, processor: processEmailJob },
+  // Low-stock crossings after postings, and the daily digest (repeatable job).
+  { name: QUEUES.alerts, concurrency: 1, processor: processAlertJob },
+  // Projects: cost-used alerts after costs, issues / returns and contract changes.
+  { name: QUEUES.projects, concurrency: 2, processor: processProjectsJob },
+  // Purchasing: the daily overdue-PO digest (repeatable job, 09:00 Asia/Dhaka).
+  { name: QUEUES.purchasing, concurrency: 1, processor: processPurchasingJob },
+  // Reports: Excel / PDF exports, the every-minute scheduler tick and scheduled runs.
+  { name: QUEUES.reports, concurrency: 2, processor: processReportJob },
+  // Operations: backups and restore tests (one at a time), the nightly integrity check.
+  { name: QUEUES.backups, concurrency: 1, processor: processOpsJob },
+  { name: QUEUES.integrity, concurrency: 1, processor: processOpsJob },
+];
+
+async function start() {
+  const e = env(); // fail fast on bad configuration
+  await initErrorTracking("worker");
   wireModules();
 
-  const workers = [
-    new Worker(QUEUES.system, (job) => processSystemJob(job, log.child({ queue: QUEUES.system })), {
-      connection: bullConnection(),
-      prefix: queuePrefix(),
-      concurrency: 5,
-    }),
-    // One import at a time: each commit is a single large transaction.
-    new Worker(QUEUES.catalogImport, (job) => processCatalogImportJob(job, log.child({ queue: QUEUES.catalogImport })), {
-      connection: bullConnection(),
-      prefix: queuePrefix(),
-      concurrency: 1,
-    }),
-    // PDF rendering (headless Chromium) — only ever runs in this process. Purchase orders and project cost statements too.
-    new Worker(QUEUES.documents, (job) => (job.name === PO_DOCUMENT_JOB ? processPoDocumentJob : job.name === COST_STATEMENT_JOB ? processCostStatementJob : processDocumentJob)(job, log.child({ queue: QUEUES.documents })), {
-      connection: bullConnection(),
-      prefix: queuePrefix(),
-      concurrency: 2,
-    }),
-    // Opening-stock validation, one file at a time.
-    new Worker(QUEUES.openingImport, (job) => processOpeningImportJob(job, log.child({ queue: QUEUES.openingImport })), {
-      connection: bullConnection(),
-      prefix: queuePrefix(),
-      concurrency: 1,
-    }),
-    // Outgoing email; BullMQ retries failures with exponential backoff (EMAIL_MAX_ATTEMPTS).
-    new Worker(QUEUES.email, (job) => processEmailJob(job, log.child({ queue: QUEUES.email })), {
-      connection: bullConnection(),
-      prefix: queuePrefix(),
-      concurrency: 3,
-    }),
-    // Low-stock crossings after postings, and the daily digest (repeatable job).
-    new Worker(QUEUES.alerts, (job) => processAlertJob(job, log.child({ queue: QUEUES.alerts })), {
-      connection: bullConnection(),
-      prefix: queuePrefix(),
-      concurrency: 1,
-    }),
-    // Purchasing: the daily overdue-PO digest (repeatable job, 09:00 Asia/Dhaka).
-    // Projects: cost-used alerts after costs, issues / returns and contract changes.
-    new Worker(QUEUES.projects, (job) => processProjectsJob(job, log.child({ queue: QUEUES.projects })), {
-      connection: bullConnection(),
-      prefix: queuePrefix(),
-      concurrency: 2,
-    }),
-    new Worker(QUEUES.purchasing, (job) => processPurchasingJob(job, log.child({ queue: QUEUES.purchasing })), {
-      connection: bullConnection(),
-      prefix: queuePrefix(),
-      concurrency: 1,
-    }),
-    // Reports: Excel / PDF exports, the every-minute scheduler tick and scheduled runs (PDFs render here).
-    new Worker(QUEUES.reports, (job) => processReportJob(job, log.child({ queue: QUEUES.reports })), {
-      connection: bullConnection(),
-      prefix: queuePrefix(),
-      concurrency: 2,
-    }),
-  ];
+  const selected = selectQueues(e.WORKER_QUEUES, QUEUE_DEFS.map((q) => q.name));
+  if (!selected.length) throw new Error(`WORKER_QUEUES="${e.WORKER_QUEUES}" selects no queue`);
+
+  const workers = QUEUE_DEFS.filter((q) => selected.includes(q.name)).map(
+    (q) =>
+      new Worker(q.name, (job) => q.processor(job, log.child({ queue: q.name, jobId: job.id, job: job.name })), {
+        connection: bullConnection(),
+        prefix: queuePrefix(),
+        concurrency: q.concurrency,
+      }),
+  );
 
   for (const w of workers) {
-    w.on("failed", (job, err) => log.error({ err, jobId: job?.id, queue: w.name, job: job?.name }, "job failed"));
+    w.on("failed", (job, err) => {
+      log.error({ err, jobId: job?.id, queue: w.name, job: job?.name, attempt: job?.attemptsMade }, "job failed");
+      // The last attempt failed: report it (no-op without SENTRY_DSN).
+      if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) captureError(err, { queue: w.name, job: job.name, jobId: job.id });
+    });
     w.on("error", (err) => log.error({ err, queue: w.name }, "worker error"));
   }
-  log.info({ queues: workers.map((w) => w.name) }, "worker started");
-  // The app runs migrations on release; until they are done the settings table may not exist yet.
-  const schedule = (attempt: number) =>
-    ensureDigestSchedule(log).catch((err) => {
-      log.warn({ err, attempt }, "could not schedule the low-stock digest yet; retrying");
-      if (attempt < 40) setTimeout(() => void schedule(attempt + 1), 15_000);
-      else log.error({ err }, "gave up scheduling the low-stock digest");
-    });
-  void schedule(1);
-  ensurePoDigestSchedule(log).catch((err) => log.error({ err }, "could not schedule the PO overdue digest"));
-  registerReportScheduler().catch((err) => log.error({ err }, "could not register the report scheduler"));
+  const stopHeartbeat = startHeartbeat(selected);
+  log.info({ queues: selected, version: e.APP_VERSION, commit: e.GIT_COMMIT }, "worker started");
 
-  const shutdown = async (signal: string) => {
-    log.info({ signal }, "worker shutting down");
-    await Promise.allSettled(workers.map((w) => w.close()));
-    await prisma.$disconnect();
-    process.exit(0);
-  };
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
-  process.on("SIGINT", () => void shutdown("SIGINT"));
+  // Repeatable jobs: registered by the process that consumes the queue.
+  if (selected.includes(QUEUES.alerts)) {
+    // The release runs migrations first; until they are done the settings table may not exist yet.
+    const schedule = (attempt: number) =>
+      ensureDigestSchedule(log).catch((err) => {
+        log.warn({ err, attempt }, "could not schedule the low-stock digest yet; retrying");
+        if (attempt < 40) setTimeout(() => void schedule(attempt + 1), 15_000);
+        else log.error({ err }, "gave up scheduling the low-stock digest");
+      });
+    void schedule(1);
+  }
+  if (selected.includes(QUEUES.purchasing)) ensurePoDigestSchedule(log).catch((err) => log.error({ err }, "could not schedule the PO overdue digest"));
+  if (selected.includes(QUEUES.reports)) registerReportScheduler().catch((err) => log.error({ err }, "could not register the report scheduler"));
+  registerOpsSchedules(selected).catch((err) => log.error({ err }, "could not register the backup / integrity schedules"));
+
+  // Graceful shutdown (closed in reverse order): Prisma, Redis, queue connections, Chromium, heartbeat.
+  onShutdown("prisma", () => prisma.$disconnect());
+  onShutdown("redis", () => redis().quit());
+  onShutdown("queues", () => closeQueues());
+  onShutdown("chromium", () => closePdfBrowser());
+  onShutdown("error-tracking", () => flushErrorTracking());
+  onShutdown("heartbeat", () => stopHeartbeat());
+
+  const stop = (signal: string) =>
+    void shutdown(signal, {
+      timeoutMs: e.SHUTDOWN_TIMEOUT_MS,
+      log,
+      // close() stops taking new jobs and waits for the running ones. Past the timeout the worker
+      // connections are dropped: lock renewal stops, and the running jobs go back to the queue
+      // (another worker's stalled check moves them to waiting) instead of being lost.
+      beforeDrain: async () => {
+        const graceful = Promise.allSettled(workers.map((w) => w.close()));
+        const finished = await Promise.race([graceful.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), e.SHUTDOWN_TIMEOUT_MS).unref())]);
+        if (!finished) {
+          log.warn({}, "jobs still running at the shutdown timeout: releasing them back to the queue");
+          await Promise.allSettled(workers.map((w) => w.disconnect()));
+        }
+      },
+    });
+  process.on("SIGTERM", () => stop("SIGTERM"));
+  process.on("SIGINT", () => stop("SIGINT"));
 }
 
-start();
+start().catch((err) => {
+  log.fatal({ err }, "worker could not start");
+  process.exit(1);
+});

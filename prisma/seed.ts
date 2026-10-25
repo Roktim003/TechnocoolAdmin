@@ -18,7 +18,7 @@
  *  - Reports: with sample data and no schedules yet, three scheduled emails to the Admin
  *    (see seed-reports.ts).
  */
-import bcrypt from "bcryptjs";
+import { hash as bcryptHash } from "@node-rs/bcrypt";
 import { PrismaClient } from "@prisma/client";
 import { MODULE_KEYS } from "@/shared/rbac/levels";
 import { ADMIN_ROLE_NAME, SEED_ROLES, SEED_WAREHOUSES } from "@/modules/identity/domain/seed-roles";
@@ -164,7 +164,7 @@ export async function seed(
       data: {
         username,
         name: opts.adminName,
-        passwordHash: await bcrypt.hash(opts.adminPassword, opts.bcryptRounds),
+        passwordHash: await bcryptHash(opts.adminPassword, opts.bcryptRounds),
         roleId: adminRole.id,
         warehouses: { create: warehouses.map((w) => ({ warehouseId: w.id })) },
       },

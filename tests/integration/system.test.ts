@@ -9,12 +9,13 @@ import { logger } from "@/shared/logger/logger";
 import { call } from "../helpers/http";
 
 describe("GET /health", () => {
-  it("reports database and redis up", async () => {
+  it("is a liveness probe: 200 with version and uptime, no dependency checks", async () => {
     const res = await call(healthRoute.GET, "GET", "/health");
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe("ok");
-    expect(res.body.data.checks.database.status).toBe("up");
-    expect(res.body.data.checks.redis.status).toBe("up");
+    expect(res.body.data).toHaveProperty("version");
+    expect(res.body.data.uptimeSeconds).toBeGreaterThanOrEqual(0);
+    expect(res.body.data.checks).toBeUndefined();
   });
 });
 

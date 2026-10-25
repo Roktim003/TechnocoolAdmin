@@ -41,6 +41,7 @@ export function UsersTab({ roles, warehouses, currentUserId, initialQuery, notif
   const [editing, setEditing] = useState<UserDto | "new" | null>(null);
   const [passwordFor, setPasswordFor] = useState<UserDto | null>(null);
   const [confirmDisable, setConfirmDisable] = useState<UserDto | null>(null);
+  const [confirmLogoutAll, setConfirmLogoutAll] = useState<UserDto | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -84,6 +85,19 @@ export function UsersTab({ roles, warehouses, currentUserId, initialQuery, notif
       afterChange(enable ? "User enabled" : "User disabled", enable ? `${user.name} can log in again.` : `${user.name} was signed out everywhere and can no longer log in.`);
     } catch (err) {
       notify({ kind: "error", title: enable ? "Could not enable user" : "Could not disable user", message: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logoutAll(user: UserDto) {
+    setBusy(true);
+    try {
+      const r = await api<{ data: { sessionsRevoked: number } }>(`/users/${user.id}/logout-all`, { method: "POST" });
+      setConfirmLogoutAll(null);
+      afterChange("Logged out of all devices", `${user.name} must log in again on every device (${r.data.sessionsRevoked} session${r.data.sessionsRevoked === 1 ? "" : "s"} ended).`);
+    } catch (err) {
+      notify({ kind: "error", title: "Could not log out the user", message: errorMessage(err) });
     } finally {
       setBusy(false);
     }
@@ -157,6 +171,9 @@ export function UsersTab({ roles, warehouses, currentUserId, initialQuery, notif
           </Button>
           <Button kind="ghost" size="sm" onClick={() => setPasswordFor(u)}>
             Set password
+          </Button>
+          <Button kind="ghost" size="sm" onClick={() => setConfirmLogoutAll(u)} disabled={u.status !== "active"}>
+            Log out all devices
           </Button>
           {u.status === "active" ? (
             <Button kind="ghost" size="sm" onClick={() => setConfirmDisable(u)} disabled={u.id === currentUserId} title={u.id === currentUserId ? "You cannot disable your own account" : undefined}>
@@ -279,6 +296,20 @@ export function UsersTab({ roles, warehouses, currentUserId, initialQuery, notif
         onSubmit={() => confirmDisable && setEnabled(confirmDisable, false)}
       >
         <p>They will be signed out of every device immediately and will not be able to log in until re-enabled.</p>
+      </Modal>
+
+      <Modal
+        open={!!confirmLogoutAll}
+        size="sm"
+        label="Log out all devices"
+        title={`Log out ${confirmLogoutAll?.name ?? ""} everywhere?`}
+        primaryText="Log out all devices"
+        primaryKind="danger"
+        submitting={busy}
+        onClose={() => setConfirmLogoutAll(null)}
+        onSubmit={() => confirmLogoutAll && logoutAll(confirmLogoutAll)}
+      >
+        <p>Every browser and phone signed in as this user is signed out at once. They can log in again with their password. Use this when a phone is lost or a password may be known to someone else.</p>
       </Modal>
     </>
   );

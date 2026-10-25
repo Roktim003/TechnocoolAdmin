@@ -1,0 +1,29 @@
+{
+  "$comment": "Reviewed exceptions for scripts/audit-deps.mjs. Each one needs a reason (why it can't be exploited here, or why the fix is a planned major upgrade) and an expiry date; CI fails again when it expires. See docs/security-review.md (A06).",
+  "advisories": [
+    {
+      "id": "GHSA-mrhx-c7xc-m3w5",
+      "package": "zod 3.25.76 (and @asteasolutions/zod-to-openapi, chromium-bidi through it)",
+      "reason": "Memory exhaustion when validating oversized constrained collections. Request bodies are capped at MAX_JSON_BODY_KB (1 MB) before Zod sees them, and every array in a request schema has a max() (checked: the arrays without one are response and OpenAPI shapes only). The fix is Zod 4 (a breaking upgrade of every schema plus zod-to-openapi 8): planned as its own change.",
+      "expires": "2027-01-31"
+    },
+    {
+      "id": "GHSA-ggr8-5vv4-36mx",
+      "package": "deepmerge-ts via @prisma/config (prisma 6.19 CLI)",
+      "reason": "Stack exhaustion when merging recursive object graphs. Only the Prisma CLI merges its own config file at migrate / generate time; no request data reaches it. The fix is Prisma 7 (driver adapters, new config): planned as its own change.",
+      "expires": "2027-01-31"
+    },
+    {
+      "id": "GHSA-6g55-p6wh-862q",
+      "package": "postcss bundled with next 15.5",
+      "reason": "Source-map file read during CSS processing. PostCSS runs only at build time on StockBook's own stylesheets; no user CSS is ever processed. The fix is Next.js 16: planned as its own change.",
+      "expires": "2027-01-31"
+    },
+    {
+      "id": "GHSA-r28c-9q8g-f849",
+      "package": "postcss bundled with next 15.5",
+      "reason": "Same as GHSA-6g55-p6wh-862q: build-time only, own stylesheets only.",
+      "expires": "2027-01-31"
+    }
+  ]
+}

@@ -113,6 +113,10 @@ function userRepository(db: Db): UserRepository {
       return toUser(row);
     },
 
+    async revokeSessions(id) {
+      await db.user.update({ where: { id }, data: { tokenVersion: { increment: 1 } } });
+    },
+
     async setPassword(id, passwordHash) {
       const row = await db.user.update({
         where: { id },

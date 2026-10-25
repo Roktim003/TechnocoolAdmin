@@ -78,14 +78,17 @@ export class StockQueryService {
     return this.store.movements(query, this.scope(actor, query.filters.warehouseId));
   }
 
-  listSerials(query: ListQuery<SerialFilters>) {
-    return this.store.listSerials(query);
+  /** Warehouse-scoped like the serial report: in the user's warehouses, or out of stock after passing through one. */
+  listSerials(actor: InventoryActor, query: ListQuery<SerialFilters>) {
+    return this.store.listSerials(query, this.scope(actor, query.filters.warehouseId));
   }
 
-  async serial(id: string) {
+  async serial(actor: InventoryActor, id: string) {
     const [s] = await this.store.serialsById([id]);
     if (!s) throw new NotFoundError("Serial number");
-    const list = await this.store.listSerials({ page: 1, pageSize: 1, skip: 0, take: 1, sort: [{ field: "serial", direction: "asc" }], q: s.serial, filters: { productId: s.productId } });
+    const list = await this.store.listSerials({ page: 1, pageSize: 1, skip: 0, take: 1, sort: [{ field: "serial", direction: "asc" }], q: s.serial, filters: { productId: s.productId } }, actor.warehouseIds);
+    // Object-level authorization: a serial of another warehouse is refused, not shown.
+    if (!list.items.some((x) => x.id === id)) throw InventoryErrors.outOfScope();
     return { serial: list.items.find((x) => x.id === id) ?? { ...s, productCode: "", productName: "", warehouseCode: null, projectCode: null, customerName: null }, history: await this.store.serialHistory(id) };
   }
 }

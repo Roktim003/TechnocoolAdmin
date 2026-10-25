@@ -7,6 +7,7 @@ export const IdentityErrors = {
     new AppError("ACCOUNT_LOCKED", 403, "This account is locked after too many failed login attempts. Ask an Admin to set a new password."),
   accountDisabled: () => new ForbiddenError("This account has been disabled. Contact an Admin.", "ACCOUNT_DISABLED"),
   sessionRevoked: () => new UnauthenticatedError("Your session has ended. Please log in again."),
+  sessionIdle: () => new UnauthenticatedError("You were signed out after a period of inactivity. Please log in again.", "SESSION_IDLE"),
   refreshInvalid: () => new UnauthenticatedError("Refresh token is invalid or expired. Please log in again."),
   refreshReused: () => new UnauthenticatedError("Refresh token was already used. All sessions from this login were signed out.", "REFRESH_TOKEN_REUSED"),
   usernameTaken: (username: string) =>

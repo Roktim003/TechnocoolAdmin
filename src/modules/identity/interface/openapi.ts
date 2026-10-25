@@ -139,6 +139,17 @@ registry.registerPath({
   responses: { 200: json(dataOf(UserSchema)), ...errors(400, 401, 403, 404) },
 });
 
+registry.registerPath({
+  method: "post",
+  path: "/users/{id}/logout-all",
+  tags: ["Users"],
+  summary: "Log out all devices (Admin only)",
+  description: `${ADMIN} Revokes every refresh token of the user (web and mobile) and invalidates access tokens already issued. The user must log in again everywhere. Audited as user.logout_all.`,
+  security: AUTHENTICATED,
+  request: { params: IdParams, headers: IdempotencyHeaders },
+  responses: { 200: json(dataOf(z.object({ sessionsRevoked: z.number().int() }))), ...errors(401, 403, 404) },
+});
+
 /* ── Roles ── */
 
 registry.registerPath({

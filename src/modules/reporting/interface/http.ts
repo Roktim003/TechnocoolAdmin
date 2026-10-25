@@ -67,7 +67,7 @@ export const reportHandlers = {
     const out = await r().reports.run(viewer(ctx), reportId(ctx), query);
     return { data: out.rows, meta: out.meta, extra: { totals: out.totals, chart: out.chart, report: out.report, params: out.params } };
   }),
-  export: authedRoute<IdParams>(VIEW, async (ctx) => {
+  export: authedRoute<IdParams>({ ...VIEW, rateLimit: "exports" }, async (ctx) => {
     const body = await ctx.body(ExportRequestSchema);
     const job = await r().exports.request(viewer(ctx), actor(ctx), reportId(ctx), body.format, body.params, body.sort);
     return { status: 202, data: job, headers: { Location: `/api/v1/exports/${job.jobId}` } };

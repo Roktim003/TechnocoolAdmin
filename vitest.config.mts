@@ -1,10 +1,14 @@
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 
-const alias = { "@": path.resolve(__dirname, "src") };
+const alias = { "@": path.resolve(import.meta.dirname, "src") };
+
+// Pages and components are tested as React elements (automatic JSX runtime, like Next.js).
+const oxc = { jsx: { runtime: "automatic" as const } };
 
 export default defineConfig({
   resolve: { alias },
+  oxc,
   test: {
     environment: "node",
     setupFiles: ["tests/setup/env.ts"],
@@ -15,10 +19,12 @@ export default defineConfig({
     projects: [
       {
         resolve: { alias },
+        oxc,
         test: { name: "unit", include: ["tests/unit/**/*.test.ts"], setupFiles: ["tests/setup/env.ts"] },
       },
       {
         resolve: { alias },
+        oxc,
         test: {
           name: "integration",
           include: ["tests/integration/**/*.test.ts"],

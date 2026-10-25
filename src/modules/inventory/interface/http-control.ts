@@ -163,7 +163,7 @@ export const lowStockHandlers = {
     const rows = sortRows(await inventory().alerts.lowStock(actorOf(ctx), { ...query.filters, q: query.q }), query.sort);
     return { data: rows.slice(query.skip, query.skip + query.take), meta: pageMeta(rows.length, query.page, query.pageSize) };
   }),
-  export: authedRoute(VIEW, async (ctx) => {
+  export: authedRoute({ ...VIEW, rateLimit: "exports" }, async (ctx) => {
     const query = ctx.query(LowStockQuerySchema);
     const a = actorOf(ctx);
     const rows = sortRows(await inventory().alerts.lowStock(a, { ...query.filters, q: query.q }), query.sort);

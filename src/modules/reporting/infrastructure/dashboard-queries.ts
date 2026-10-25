@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { ENTRY_TYPE_META, type EntryType } from "@/modules/inventory/domain/types";
 import { OPEN } from "@/modules/purchasing/domain/types";
-import { deleteKeys, redis } from "@/shared/redis/redis";
+import { redis } from "@/shared/redis/redis";
 import { logger } from "@/shared/logger/logger";
 import { hasLevel } from "@/shared/rbac/levels";
 import type { DashboardQueries } from "../application/dashboard.service";
@@ -162,7 +162,8 @@ export const dashboardQueries: DashboardQueries = {
     }),
 };
 
-const PREFIX = "dash:";
+const CHANGED_KEY = "dash:changed-at";
+const refreshKey = (key: string) => `${key}:refresh`;
 
 /** Redis cache for the shared dashboard widgets; Redis errors fall back to computing. */
 export const redisDashboardCache: DashboardCache = {
@@ -177,16 +178,31 @@ export const redisDashboardCache: DashboardCache = {
   },
   async set(key, value, ttl) {
     try {
-      await redis().set(key, JSON.stringify(value), "EX", ttl);
+      await redis().multi().set(key, JSON.stringify(value), "EX", ttl).del(refreshKey(key)).exec();
     } catch (err) {
       logger.warn({ err }, "dashboard cache write failed");
     }
   },
   async clear() {
     try {
-      await deleteKeys(`${PREFIX}*`);
+      await redis().set(CHANGED_KEY, String(Date.now()), "EX", 24 * 3600);
     } catch (err) {
       logger.warn({ err }, "dashboard cache clear failed");
+    }
+  },
+  async changedAt() {
+    try {
+      return Number((await redis().get(CHANGED_KEY)) ?? 0);
+    } catch {
+      return Date.now(); // can't tell: treat cached widgets as stale
+    }
+  },
+  async claimRefresh(key) {
+    try {
+      // Expires on its own if the refresher dies; set() removes it when the new value is stored.
+      return (await redis().set(refreshKey(key), "1", "EX", 15, "NX")) === "OK";
+    } catch {
+      return true;
     }
   },
 };

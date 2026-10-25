@@ -2,7 +2,8 @@ import { emptyPermissionMap, type PermissionMap, type SensitiveFlags } from "@/s
 import { IdentityErrors } from "./errors";
 import type { Role, User } from "./types";
 
-export const PASSWORD_MIN_LENGTH = 8;
+/** Passwords set by an Admin: at least this long and not on the common-password list. */
+export const PASSWORD_MIN_LENGTH = 10;
 export const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/;
 
 /** Usernames are case-insensitive: they are stored and compared lower-cased. */

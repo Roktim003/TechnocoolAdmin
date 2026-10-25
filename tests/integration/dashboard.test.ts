@@ -109,6 +109,17 @@ describe("cache", () => {
     expect(widget(fresh, "stock-value").value).toBe("9000.00");
   });
 
+  it("after a posting, one reader recomputes; readers at the same moment get the previous widgets (no stampede)", async () => {
+    await dashboard(); // warm
+    await grn(token, A, [{ productId, qty: 1, unitPrice: 1000 }]);
+    const all = await Promise.all([dashboard(), dashboard(), dashboard()]);
+    expect(all.filter((d) => !d.cached)).toHaveLength(1);
+    expect(all.filter((d) => d.cached)).toHaveLength(2);
+    const next = await dashboard(); // the recomputed widgets are now shared
+    expect(next.cached).toBe(true);
+    expect(widget(next, "stock-value").value).toBe(widget(all.find((d) => !d.cached)!, "stock-value").value);
+  });
+
   it("personal widgets are never shared between users of the same role", async () => {
     const m2 = (await userToken(token, "Manager")).token;
     await dashboard(tokens.Manager);

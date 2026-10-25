@@ -10,7 +10,7 @@ export function smtpMailer(): Mailer {
     host: e.SMTP_HOST,
     port: e.SMTP_PORT,
     secure: e.SMTP_SECURE,
-    auth: e.SMTP_USER ? { user: e.SMTP_USER, pass: e.SMTP_PASSWORD ?? "" } : undefined,
+    auth: e.SMTP_USER ? { user: e.SMTP_USER, pass: e.SMTP_PASS ?? e.SMTP_PASSWORD ?? "" } : undefined,
     connectionTimeout: 15_000,
     greetingTimeout: 15_000,
     socketTimeout: 30_000,

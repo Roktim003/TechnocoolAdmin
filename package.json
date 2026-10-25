@@ -1,15 +1,15 @@
 {
   "name": "stockbook",
-  "version": "0.1.0",
+  "version": "0.7.0",
   "private": true,
-  "description": "StockBook — inventory management for an HVAC contractor (Module 0: foundation, auth, users & roles)",
+  "description": "StockBook — inventory management for an HVAC contractor",
   "engines": {
-    "node": ">=20.18"
+    "node": ">=22.12"
   },
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build && npm run build:worker",
-    "build:worker": "esbuild src/worker/index.ts --bundle --platform=node --target=node20 --format=cjs --packages=external --tsconfig=tsconfig.json --outfile=dist/worker.js && esbuild prisma/seed.ts --bundle --platform=node --target=node20 --format=cjs --packages=external --tsconfig=tsconfig.json --outfile=dist/seed.js",
+    "build:worker": "esbuild src/worker/index.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --tsconfig=tsconfig.json --outfile=dist/worker.js && esbuild src/ops/cli.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --tsconfig=tsconfig.json --outfile=dist/ops.js && esbuild prisma/seed.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --tsconfig=tsconfig.json --outfile=dist/seed.js && esbuild scripts/seed-large.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --tsconfig=tsconfig.json --outfile=dist/seed-large.js",
     "start": "next start",
     "worker": "tsx --env-file-if-exists=.env src/worker/index.ts",
     "worker:dev": "tsx watch --env-file-if-exists=.env src/worker/index.ts",
@@ -27,53 +27,62 @@
     "db:reset": "prisma migrate reset --force --skip-seed && npm run db:seed",
     "db:studio": "prisma studio",
     "test:db:up": "docker compose -f docker-compose.test.yml up -d --wait",
-    "test:db:down": "docker compose -f docker-compose.test.yml down -v"
+    "test:db:down": "docker compose -f docker-compose.test.yml down -v",
+    "ops": "tsx --env-file-if-exists=.env src/ops/cli.ts",
+    "seed:large": "tsx --env-file-if-exists=.env scripts/seed-large.ts",
+    "audit:deps": "node scripts/audit-deps.mjs",
+    "test:matrix": "vitest run --project integration tests/integration/authorization-matrix.test.ts",
+    "smoke-test": "node scripts/smoke-test.mjs",
+    "docs:screenshots": "node scripts/user-guide-screenshots.mjs",
+    "prod:up": "docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build",
+    "prod:down": "docker compose -f docker-compose.prod.yml --env-file .env.prod down"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "7.3.4",
     "@aws-sdk/client-s3": "3.1136.0",
     "@fontsource/ibm-plex-mono": "5.2.7",
     "@fontsource/ibm-plex-sans": "5.2.8",
+    "@node-rs/bcrypt": "1.10.9",
     "@prisma/client": "6.19.3",
-    "bcryptjs": "3.0.3",
+    "@sentry/browser": "10.76.2",
+    "@sentry/node": "10.76.2",
     "bullmq": "5.81.5",
     "decimal.js": "10.6.0",
     "exceljs": "4.4.0",
     "ioredis": "5.11.1",
     "jose": "5.10.0",
     "next": "15.5.28",
-    "nodemailer": "6.10.1",
+    "nodemailer": "10.1.7",
     "pino": "9.14.0",
     "prisma": "6.19.3",
-    "puppeteer-core": "25.12.0",
+    "puppeteer-core": "25.13.0",
     "react": "19.1.10",
     "react-dom": "19.1.10",
     "server-only": "0.0.1",
-    "sharp": "0.34.5",
+    "sharp": "0.35.5",
     "zod": "3.25.76"
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.3.1",
     "@types/node": "22.20.5",
-    "@types/nodemailer": "6.4.17",
     "@types/react": "19.1.17",
     "@types/react-dom": "19.1.11",
-    "esbuild": "0.25.12",
+    "esbuild": "0.28.2",
     "eslint": "9.39.5",
     "eslint-config-next": "15.5.28",
     "pino-pretty": "13.2.0",
+    "playwright-core": "1.64.0",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
-    "vitest": "3.2.7"
+    "vite": "8.3.5",
+    "vitest": "4.1.11"
   },
   "allowScripts": {
     "@prisma/client@6.19.3": true,
     "prisma@6.19.3": true,
     "@prisma/engines@6.19.3": true,
-    "esbuild@0.25.12": true,
     "esbuild@0.28.2": true,
     "unrs-resolver@1.12.2": true,
-    "msgpackr-extract@3.0.4": true,
-    "sharp@0.34.5": true
+    "msgpackr-extract@3.0.4": true
   }
 }

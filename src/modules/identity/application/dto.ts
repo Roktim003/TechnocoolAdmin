@@ -3,6 +3,7 @@ import { listQuerySchema } from "@/shared/pagination/list-query";
 import { DateRangeFilters } from "@/shared/time/dates";
 import { MODULE_KEYS, PERMISSION_LEVELS } from "@/shared/rbac/levels";
 import { PASSWORD_MIN_LENGTH, USERNAME_PATTERN } from "../domain/rules";
+import { isCommonPassword } from "../domain/common-passwords";
 
 /* ───────────────────────────── shared pieces ───────────────────────────── */
 
@@ -25,7 +26,8 @@ const PasswordSchema = z
   .string()
   .min(PASSWORD_MIN_LENGTH, `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`)
   .max(128, "Password must be at most 128 characters.")
-  .openapi({ example: "S3cure-pass" });
+  .refine((p) => !isCommonPassword(p), "This password is too common. Choose one that is harder to guess.")
+  .openapi({ example: "Mango-Rain-42", description: "At least 10 characters, not a common password" });
 
 const UsernameSchema = z
   .string()

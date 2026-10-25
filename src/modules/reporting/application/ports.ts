@@ -246,6 +246,12 @@ export type AuditSink = (actor: ActorContext, entry: { action: string; entityTyp
 
 export interface DashboardCache {
   get<T>(key: string): Promise<T | null>;
+  /** Stores the value and gives up this key's refresh claim. */
   set(key: string, value: unknown, ttlSeconds: number): Promise<void>;
+  /** Data changed: everything cached before now is stale (kept, so concurrent readers still have an answer). */
   clear(): Promise<void>;
+  /** When data last changed (epoch ms), 0 if never. */
+  changedAt(): Promise<number>;
+  /** One refresher per key at a time: true when this caller should recompute a stale entry. */
+  claimRefresh(key: string): Promise<boolean>;
 }

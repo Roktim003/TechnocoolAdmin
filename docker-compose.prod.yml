@@ -1,0 +1,217 @@
+# StockBook — reference production stack (works on any Docker host; adapt to your platform).
+#
+#   cp .env.prod.example .env.prod            # fill in secrets; leave the "later" values empty for now
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile local up -d --build
+#
+# Start order is enforced: postgres + redis → migrate (backup, migrations, seed; runs once and
+# exits) → web + worker + backup. Only `web` publishes a port. PostgreSQL and Redis sit on an
+# internal network with no route to the outside.
+#
+# The `local` profile adds MinIO (S3-compatible file storage) and Mailpit (catches email) so the
+# whole stack runs on one machine. On a real server point S3_* at your storage provider and
+# SMTP_* at your mail provider, and start without `--profile local`.
+name: stockbook-prod
+
+x-image: &image
+  image: ${STOCKBOOK_IMAGE:-stockbook:local}
+
+# Only `migrate` builds (`up --build`); web, worker and backup run the same tag. One build
+# section per service would build and export the identical image four times.
+x-build: &build
+  context: .
+  dockerfile: docker/Dockerfile
+  args:
+    APP_VERSION: ${APP_VERSION:-0.7.0}
+    GIT_COMMIT: ${GIT_COMMIT:-local}
+
+x-app-env: &app-env
+  NODE_ENV: production
+  TZ: Asia/Dhaka
+  # ── required ──
+  APP_URL: ${APP_URL:?set APP_URL}
+  DATABASE_URL: postgresql://${POSTGRES_USER:-stockbook}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stockbook}?schema=public
+  REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET (32+ random bytes)}
+  REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?set REFRESH_TOKEN_SECRET (32+ random bytes)}
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD (10+ characters)}
+  ADMIN_NAME: ${ADMIN_NAME:-System Administrator}
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_BUCKET: ${S3_BUCKET:-stockbook}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY}
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+  S3_AUTO_CREATE_BUCKET: ${S3_AUTO_CREATE_BUCKET:-false}
+  # ── web / proxy ──
+  TRUST_PROXY: ${TRUST_PROXY:-false}
+  COOKIE_SECURE: ${COOKIE_SECURE:-true}
+  TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+  CORS_ORIGINS: ${CORS_ORIGINS:-}
+  SESSION_IDLE_TIMEOUT_MINUTES: ${SESSION_IDLE_TIMEOUT_MINUTES:-30}
+  RATE_LIMIT_API_PER_MINUTE: ${RATE_LIMIT_API_PER_MINUTE:-300}
+  RATE_LIMIT_EXPORTS_PER_MINUTE: ${RATE_LIMIT_EXPORTS_PER_MINUTE:-10}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  COMPANY_NAME: ${COMPANY_NAME:-StockBook}
+  SEED_SAMPLE_DATA: ${SEED_SAMPLE_DATA:-false}
+  # ── fill in later (optional: the app works and says "not set up yet" until then) ──
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_SECURE: ${SMTP_SECURE:-false}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASS: ${SMTP_PASS:-}
+  SMTP_FROM: ${SMTP_FROM:-StockBook <no-reply@stockbook.local>}
+  BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:-}
+  BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+  BACKUP_S3_REGION: ${BACKUP_S3_REGION:-us-east-1}
+  BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+  BACKUP_S3_KEY: ${BACKUP_S3_KEY:-}
+  BACKUP_S3_SECRET: ${BACKUP_S3_SECRET:-}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+
+x-app: &app
+  <<: *image
+  restart: unless-stopped
+  init: false # tini is the image entrypoint
+  stop_grace_period: 30s # SHUTDOWN_TIMEOUT_MS (25 s) + margin
+  security_opt: ["no-new-privileges:true"]
+  networks: [backend, edge]
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  # One-off release step: backup (when the database already has data) → migrations → seed.
+  migrate:
+    <<: *app
+    build: *build
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      <<: *app-env
+      SERVICE_NAME: stockbook-migrate
+      DATABASE_POOL_SIZE: "2"
+    volumes: [backups:/backups]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck: { disable: true }
+
+  web:
+    <<: *app
+    command: ["web"]
+    environment:
+      <<: *app-env
+      SERVICE_NAME: stockbook-web
+      DATABASE_POOL_SIZE: ${WEB_DB_POOL:-10}
+      NODE_MEMORY_MB: ${WEB_NODE_MEMORY_MB:-768}
+    mem_limit: ${WEB_MEM_LIMIT:-1g}
+    ports: ["${WEB_PORT:-3000}:3000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    environment:
+      <<: *app-env
+      SERVICE_NAME: stockbook-worker
+      WORKER_QUEUES: "*,!backups"
+      DATABASE_POOL_SIZE: ${WORKER_DB_POOL:-5}
+      NODE_MEMORY_MB: ${WORKER_NODE_MEMORY_MB:-768}
+      PDF_CONCURRENCY: ${PDF_CONCURRENCY:-1}
+      PDF_BROWSER_RESTART_AFTER: ${PDF_BROWSER_RESTART_AFTER:-50}
+    mem_limit: ${WORKER_MEM_LIMIT:-1536m}
+    shm_size: 256m # Chromium
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  # Backups (2:00 AM), restore tests (monthly) and the on-demand buttons: a worker that only
+  # takes the `backups` queue, with pg_dump and the backup volume.
+  backup:
+    <<: *app
+    command: ["worker"]
+    environment:
+      <<: *app-env
+      SERVICE_NAME: stockbook-backup
+      WORKER_QUEUES: "backups"
+      DATABASE_POOL_SIZE: "2"
+      NODE_MEMORY_MB: ${BACKUP_NODE_MEMORY_MB:-256}
+    mem_limit: ${BACKUP_MEM_LIMIT:-512m}
+    volumes: [backups:/backups]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  postgres:
+    image: postgres:16.15-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stockbook}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-stockbook}
+      TZ: Asia/Dhaka
+    command: ["postgres", "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-100}", "-c", "shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB}", "-c", "effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-1536MB}"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    networks: [backend]
+    shm_size: 256m
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7.4.11-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
+    restart: unless-stopped
+    # AOF on (queues survive a restart); noeviction: BullMQ must never lose keys to memory pressure.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "${REDIS_MAXMEMORY:-256mb}", "--maxmemory-policy", "noeviction", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+    volumes: [redisdata:/data]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+
+  # ── local profile: stand-ins for the storage and mail providers ──
+  minio:
+    profiles: ["local"]
+    image: bitnamilegacy/minio:2025.7.23@sha256:8935e75fa5d11295c17171e4aa49efe390a1193cd7f12e4d21b92af9ffef09d7
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY}
+      MINIO_DEFAULT_BUCKETS: ${S3_BUCKET:-stockbook}
+    volumes: [miniodata:/bitnami/minio/data]
+    networks: [edge]
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mailpit:
+    profiles: ["local"]
+    image: axllent/mailpit:v1.21.8@sha256:81370195cd4a0eab9604d17c2617a7525b0486f9365555253b6c5376c6350f1a
+    restart: unless-stopped
+    ports: ["8025:8025"]
+    networks: [edge]
+
+networks:
+  # No route in or out: only the app containers can reach PostgreSQL and Redis.
+  backend:
+    internal: true
+  edge: {}
+
+volumes:
+  pgdata:
+  redisdata:
+  backups:
+  miniodata:

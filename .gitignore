@@ -4,8 +4,14 @@ dist/
 coverage/
 *.tsbuildinfo
 next-env.d.ts
+# Environment files hold secrets: only the *.example files are committed.
 .env
-.env.local
-.env.test.local
+.env.*
+!.env.example
+!.env.prod.example
 npm-debug.log*
 .DS_Store
+# Local backups and load-test output
+backups/
+tests/load/results/
+docs/user-guides/.screenshots-tmp/

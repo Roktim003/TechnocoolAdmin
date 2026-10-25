@@ -1,0 +1,31 @@
+# Secret scanning (CI: `security` job). The default gitleaks rules plus StockBook's own.
+# Known non-secrets (test fixtures, documented example values) are allow-listed below; anything
+# else that looks like a key, token, password or private key fails the build.
+title = "StockBook gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "stockbook-env-secret"
+description = "A real-looking value assigned to a StockBook secret variable"
+regex = '''(?i)\b(JWT_ACCESS_SECRET|REFRESH_TOKEN_SECRET|BACKUP_ENCRYPTION_KEY|SMTP_PASS(WORD)?|BACKUP_S3_SECRET|S3_SECRET_ACCESS_KEY|POSTGRES_PASSWORD|REDIS_PASSWORD)\s*[:=]\s*["']?([A-Za-z0-9_\-+/=]{24,})'''
+secretGroup = 3
+keywords = ["secret", "pass", "key"]
+
+[allowlist]
+description = "Test fixtures and documented example values"
+paths = [
+  '''tests/setup/test-env\.ts''',
+  '''tests/unit/config\.test\.ts''',
+  '''tests/integration/backup-restore\.test\.ts''',
+  '''tests/unit/hardening\.test\.ts''',
+  '''package-lock\.json''',
+]
+regexes = [
+  '''change-me[\w-]*''',
+  '''minioadmin''',
+  '''stockbook:stockbook@''',
+  # Idempotency-Key values in tests ("approve-key-123").
+  '''^[a-z]+-key-\d{1,4}$''',
+]

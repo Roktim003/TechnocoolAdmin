@@ -181,12 +181,12 @@ describe("email", () => {
     }
   });
 
-  it("without SMTP the email is logged as SKIPPED", async () => {
+  it("without SMTP the email is logged as NOT_SENT_SMTP_MISSING", async () => {
     const { notifications } = await import("@/modules/notifications/interface/container");
     const id = await notifications().service.queueEmail({ to: "x@example.com", subject: "s", html: "h", text: "t" }, null);
     const job = (await getQueue(QUEUES.email).getJobs(["waiting"])).find((j) => j.data.emailLogId === id)!;
     await processEmailJob(job, logger);
-    expect((await prisma.emailLog.findUniqueOrThrow({ where: { id } })).status).toBe("SKIPPED");
+    expect((await prisma.emailLog.findUniqueOrThrow({ where: { id } })).status).toBe("NOT_SENT_SMTP_MISSING");
   });
 });
 

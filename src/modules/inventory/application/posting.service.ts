@@ -6,7 +6,7 @@ import { d, money, ZERO, type Dec } from "../domain/decimal";
 import { InventoryErrors } from "../domain/errors";
 import { fiscalYear, formatDocNumber, todayInDhaka } from "../domain/numbering";
 import { assertSerialCount } from "../domain/rules";
-import { ENTRY_TYPE_META, SERIAL_OUT_STATUS, takesStock, type Condition, type ProductCostState, type SerialStatus } from "../domain/types";
+import { ENTRY_TYPE_META, SERIAL_OUT_STATUS, takesStock, type Condition, type EntryStatus, type ProductCostState, type SerialStatus } from "../domain/types";
 import { receiptEvent, receiptListener } from "./receipts";
 import { balanceKey, sortKeys, type BalanceKey, type BalanceRow, type EntryRecord, type InventoryActor, type InventorySettings, type InventoryStore, type LineRecord, type MovementInsert } from "./ports";
 
@@ -14,6 +14,8 @@ export interface PostOptions {
   confirmBelowCost?: boolean;
   /** Set when posting is the result of an approval. */
   approverId?: string;
+  /** The entry, already locked (lockEntry) and loaded by the caller in this transaction: saves a reload. */
+  locked?: EntryRecord;
 }
 
 const uniq = <T>(xs: T[]) => [...new Set(xs)];
@@ -80,9 +82,12 @@ export class StockPostingService {
 
   /* ───────────────────────────── post ───────────────────────────── */
 
-  /** Posts a DRAFT or PENDING entry (transfers: dispatches it). */
-  async post(store: InventoryStore, entryId: string, actor: InventoryActor, opts: PostOptions = {}): Promise<void> {
-    const e = await store.lockEntry(entryId);
+  /**
+   * Posts a DRAFT or PENDING entry (transfers: dispatches it). Returns the entry as now stored, so
+   * callers can write the audit row without reloading it while the stock locks are still held.
+   */
+  async post(store: InventoryStore, entryId: string, actor: InventoryActor, opts: PostOptions = {}): Promise<EntryRecord> {
+    const e = opts.locked?.id === entryId ? opts.locked : await store.lockEntry(entryId);
     if (!e) throw new NotFoundError("Stock entry");
     if (!["DRAFT", "PENDING"].includes(e.status)) throw InventoryErrors.wrongStatus("post", e.status);
     if (e.type === "REVERSAL") throw InventoryErrors.wrongStatus("post", e.status);
@@ -165,8 +170,8 @@ export class StockPostingService {
       const b = balances.get(k);
       if (b) b.qtyReserved = d(b.qtyReserved).minus(q).toFixed(3);
     }
-    for (const k of keys) await store.saveBalance(balances.get(balanceKey(k))!);
-    if (!isTransfer) for (const p of productIds) await store.saveCost(p, fromCostState(states.get(p)!));
+    await store.saveBalances(keys.map((k) => balances.get(balanceKey(k))!));
+    if (!isTransfer) await store.saveCosts(productIds.map((p) => ({ productId: p, state: fromCostState(states.get(p)!) })));
     for (const [productId, t] of transit) await store.addInTransit(e.id, productId, t.qty.toFixed(3), t.value.toFixed(2));
     await store.insertMovements(movements);
     await store.deleteReservations(e.id);
@@ -178,15 +183,30 @@ export class StockPostingService {
     if (receipt) await receiptListener().posted(store.tx, receipt, { fromPending: e.status === "PENDING" });
 
     const at = now();
+    const status: EntryStatus = isTransfer ? "DISPATCHED" : "POSTED";
     await store.updateEntry(e.id, {
       number,
-      status: isTransfer ? "DISPATCHED" : "POSTED",
+      status,
       postedAt: at,
       ...(isTransfer ? { dispatchedAt: at } : {}),
       ...(opts.approverId ? { verifiedById: opts.approverId, verifiedAt: at } : {}),
       belowCostConfirmed,
       ...this.totals(calc),
     });
+    return {
+      ...e,
+      number,
+      status,
+      postedAt: at,
+      dispatchedAt: isTransfer ? at : e.dispatchedAt,
+      verifiedAt: opts.approverId ? at : e.verifiedAt,
+      belowCostConfirmed,
+      ...this.totals(calc),
+      lines: e.lines.map((l, i) => {
+        const c = calc.lines[i]!;
+        return { ...l, unitCostBdt: c.unitCostBdt, landedUnitCost: c.landedUnitCost, amount: c.amount, costAmount: c.costAmount };
+      }),
+    };
   }
 
   /**
@@ -228,10 +248,12 @@ export class StockPostingService {
   }
 
   async saveComputed(store: InventoryStore, e: EntryRecord, calc: CalcResult): Promise<void> {
-    for (const [i, line] of e.lines.entries()) {
-      const c = calc.lines[i]!;
-      await store.updateLine(line.id, { unitCostBdt: c.unitCostBdt, landedUnitCost: c.landedUnitCost, amount: c.amount, costAmount: c.costAmount });
-    }
+    await store.updateLineCosts(
+      e.lines.map((line, i) => {
+        const c = calc.lines[i]!;
+        return { lineId: line.id, unitCostBdt: c.unitCostBdt, landedUnitCost: c.landedUnitCost, amount: c.amount, costAmount: c.costAmount };
+      }),
+    );
     for (const [i, ch] of e.charges.entries()) await store.updateCharge(ch.id, calc.charges[i]!.amountBdt);
   }
 
@@ -309,8 +331,8 @@ export class StockPostingService {
       const available = d(b.qtyOnHand).minus(d(b.qtyReserved));
       if (available.lt(n.qty)) throw InventoryErrors.insufficientStock(n.line.product.code, available.toFixed(3), n.qty.toFixed(3), e.warehouse.name, k.condition);
       b.qtyReserved = d(b.qtyReserved).plus(n.qty).toFixed(3);
-      await store.saveBalance(b);
     }
+    await store.saveBalances(keys.map((k) => balances.get(balanceKey(k))!));
     await store.addReservations(e.id, keys.map((k) => ({ ...k, qty: need.get(balanceKey(k))!.qty.toFixed(3) })));
 
     for (const line of e.lines) {
@@ -347,8 +369,8 @@ export class StockPostingService {
       for (const r of rows) {
         const b = ensure(balances, r);
         b.qtyReserved = d(b.qtyReserved).minus(d(r.qty)).toFixed(3);
-        await store.saveBalance(b);
       }
+      await store.saveBalances(rows.map((r) => balances.get(balanceKey(r))!));
       await store.deleteReservations(e.id);
     }
     for (const s of await store.serialsReservedBy(e.id)) {
@@ -431,7 +453,7 @@ export class StockPostingService {
       if (p.short.gt(0)) shortages.push({ productId: p.line.productId, qty: p.short.toFixed(3), serials: missing });
     }
 
-    for (const k of keys) await store.saveBalance(balances.get(balanceKey(k))!);
+    await store.saveBalances(keys.map((k) => balances.get(balanceKey(k))!));
     await store.insertMovements(movements);
     await store.clearInTransit(e.id);
     await store.updateEntry(e.id, { status: "RECEIVED", receivedById: actor.actorId, receivedAt: now(), ...(input.notes ? { notes: [e.notes, `Receipt: ${input.notes}`].filter(Boolean).join("\n") } : {}) });
@@ -576,8 +598,8 @@ export class StockPostingService {
       if (line) await store.linkLineSerial(line.id, s.serial, serialId);
     }
 
-    for (const k of keys) await store.saveBalance(balances.get(balanceKey(k))!);
-    if (e.type !== "TRANSFER") for (const p of productIds) await store.saveCost(p, fromCostState(states.get(p)!));
+    await store.saveBalances(keys.map((k) => balances.get(balanceKey(k))!));
+    if (e.type !== "TRANSFER") await store.saveCosts(productIds.map((p) => ({ productId: p, state: fromCostState(states.get(p)!) })));
     else await store.clearInTransit(e.id);
     await store.insertMovements(movements);
     for (const [i, l] of e.lines.entries()) {

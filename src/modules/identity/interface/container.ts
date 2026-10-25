@@ -4,7 +4,7 @@ import { AuthService } from "../application/auth.service";
 import { DirectoryService } from "../application/directory.service";
 import { RoleService } from "../application/role.service";
 import { UserService } from "../application/user.service";
-import { bcryptHasher, hmacRefreshCodec, jwtAccessTokenIssuer, prismaUnitOfWork, redisLoginFailureCounter } from "../infrastructure/adapters";
+import { bcryptHasher, hmacRefreshCodec, jwtAccessTokenIssuer, prismaUnitOfWork, redisLoginFailureCounter, redisSessionActivity } from "../infrastructure/adapters";
 import { PrincipalStore } from "../infrastructure/principal-store";
 
 /** Composition root of the identity module: wires services to their infrastructure. */
@@ -25,7 +25,13 @@ function build() {
       accessTokens: jwtAccessTokenIssuer,
       failures,
       cache: principalStore,
-      config: { maxLoginFailures: e.LOGIN_MAX_FAILURES, refreshTokenTtlDays: e.REFRESH_TOKEN_TTL_DAYS },
+      activity: redisSessionActivity(),
+      config: {
+        maxLoginFailures: e.LOGIN_MAX_FAILURES,
+        refreshTokenTtlDays: e.REFRESH_TOKEN_TTL_DAYS,
+        loginFailureWindowSeconds: e.LOGIN_FAILURE_WINDOW_SECONDS,
+        sessionIdleMinutes: e.SESSION_IDLE_TIMEOUT_MINUTES,
+      },
     }),
     users: new UserService({ uow, hasher, failures, cache: principalStore }),
     roles: new RoleService({ uow, cache: principalStore }),

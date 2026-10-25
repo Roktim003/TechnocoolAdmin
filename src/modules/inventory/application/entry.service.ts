@@ -99,7 +99,8 @@ export class EntryService {
       const id = await store.createEntry({ ...write, draftRef: draftRef(), status: "DRAFT", createdById: actor.actorId });
       const created = (await store.entry(id))!;
       await store.audit.record(actor, { action: "stock_entry.create", entityType: "StockEntry", entityId: id, after: entrySnapshot(created) });
-      if (input.action !== "draft") await this.submitOrPost(store, id, actor, input.action, input.confirmBelowCost);
+      // A row inserted by this transaction is invisible to all others, so it needs no lock: reuse the load.
+      if (input.action !== "draft") await this.submitOrPost(store, id, actor, input.action, input.confirmBelowCost, created);
       return id;
     });
     const e = (await this.store.entry(id))!;
@@ -300,22 +301,22 @@ export class EntryService {
   /* ───────────────────────────── workflow ───────────────────────────── */
 
   /** Submit → PENDING (reserving stock), or post immediately. Runs inside the caller's transaction. */
-  private async submitOrPost(store: InventoryStore, id: string, actor: InventoryActor, action: "submit" | "post", confirmBelowCost?: boolean): Promise<void> {
-    const e = (await store.lockEntry(id))!;
+  private async submitOrPost(store: InventoryStore, id: string, actor: InventoryActor, action: "submit" | "post", confirmBelowCost?: boolean, created?: EntryRecord): Promise<void> {
+    const e = created ?? (await store.lockEntry(id))!;
     await this.validate(store, e);
     const settings = await store.settings();
-    const fresh = (await store.entry(id))!;
 
     if (action === "post") {
       if (!hasLevel(actor.level, "FULL")) throw InventoryErrors.postNotAllowed();
       if (e.type === "DAMAGE_WRITE_OFF" && settings.adminWriteOffNeedsApproval) throw InventoryErrors.writeOffNeedsApproval();
-      await this.d.posting.post(store, id, actor, { confirmBelowCost });
-      const after = (await store.entry(id))!;
+      // validate() keeps e in step with what it writes (originalLineId), so posting can use it as is.
+      const after = await this.d.posting.post(store, id, actor, { confirmBelowCost, locked: e });
       await store.audit.record(actor, { action: "stock_entry.post", entityType: "StockEntry", entityId: id, before: { status: e.status }, after: { ...entrySnapshot(after), belowCostConfirmed: after.belowCostConfirmed } });
       return;
     }
 
     // Submit: preview totals with today's costs, check the price rule early, hold the stock.
+    const fresh = (await store.entry(id))!;
     const preview = await this.d.posting.compute(store, fresh, await store.costs(fresh.lines.map((l) => l.productId)));
     const belowCost = this.d.posting.assertPriceRule(fresh, preview, actor, settings, confirmBelowCost);
     await this.d.posting.reserve(store, fresh);
@@ -375,8 +376,7 @@ export class EntryService {
       if (e.status !== "PENDING") throw InventoryErrors.wrongStatus("approve", e.status);
       this.assertVerifier(actor, e);
       await this.validate(store, e);
-      await this.d.posting.post(store, id, actor, { confirmBelowCost: confirmBelowCost ?? e.belowCostConfirmed, approverId: actor.actorId });
-      const after = (await store.entry(id))!;
+      const after = await this.d.posting.post(store, id, actor, { confirmBelowCost: confirmBelowCost ?? e.belowCostConfirmed, approverId: actor.actorId, locked: e });
       await store.audit.record(actor, {
         action: "stock_entry.approve",
         entityType: "StockEntry",

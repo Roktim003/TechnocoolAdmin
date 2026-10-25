@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp, { type Metadata } from "sharp";
 import { ValidationError } from "@/shared/errors/app-error";
 
 export const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -29,11 +29,11 @@ export async function processImage(bytes: Uint8Array, label = "file"): Promise<P
     throw new ValidationError(`${label} is larger than 5 MB.`, [{ path: "file", message: "Each photo must be 5 MB or smaller.", code: "FILE_TOO_LARGE" }]);
   }
 
-  let meta: sharp.Metadata;
+  let meta: Metadata;
   try {
     meta = await sharp(bytes).metadata();
   } catch {
-    meta = {} as sharp.Metadata;
+    meta = {} as Metadata;
   }
   const kind = meta.format ? ALLOWED[meta.format] : undefined;
   if (!kind || !meta.width || !meta.height) {

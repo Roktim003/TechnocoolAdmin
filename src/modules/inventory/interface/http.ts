@@ -182,7 +182,7 @@ export const entryHandlers = {
   }),
 
   /* documents */
-  requestDocument: authedRoute<IdParams>({ ...VIEW, idempotent: false }, async (ctx) => {
+  requestDocument: authedRoute<IdParams>({ ...VIEW, idempotent: false, rateLimit: "exports" }, async (ctx) => {
     const entryId = id(ctx);
     const { kind } = await optionalBody(ctx, DocumentRequestSchema);
     const r = await enqueueDocument(actorOf(ctx), entryId, kind);
@@ -238,11 +238,11 @@ export const stockHandlers = {
 export const serialHandlers = {
   list: authedRoute(VIEW, async (ctx) => {
     const query = ctx.query(SerialListQuerySchema);
-    const { items, total } = await inventory().stock.listSerials(query);
+    const { items, total } = await inventory().stock.listSerials(actorOf(ctx), query);
     return { data: items, meta: pageMeta(total, query.page, query.pageSize) };
   }),
   get: authedRoute<IdParams>(VIEW, async (ctx) => {
-    const r = await inventory().stock.serial(id(ctx, "Serial number"));
+    const r = await inventory().stock.serial(actorOf(ctx), id(ctx, "Serial number"));
     return { data: { ...r.serial, history: r.history.map((h) => ({ ...h, at: h.at.toISOString() })) } };
   }),
 };

@@ -17,7 +17,13 @@ export const QUEUES = {
   projects: "projects",
   /** Reporting: Excel / PDF exports, the scheduler tick and scheduled report runs. */
   reports: "reports",
+  /** Operations: database backups (2:00 AM) and restore tests (monthly). Needs pg_dump and the backup volume. */
+  backups: "backups",
+  /** Operations: the nightly integrity check (2:30 AM). */
+  integrity: "integrity",
 } as const;
+
+export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
 export interface SystemJobs {
   /** Smoke-test job: proves the app → Redis → worker path works. */
@@ -55,3 +61,10 @@ export function queueEvents(name: string): QueueEvents {
 }
 
 export const queuePrefix = prefix;
+
+/** Closes the queue connections this process opened (graceful shutdown). */
+export async function closeQueues(): Promise<void> {
+  const open = [...(globalForQueues.queues?.values() ?? [])];
+  globalForQueues.queues?.clear();
+  await Promise.allSettled(open.map((q) => q.close()));
+}

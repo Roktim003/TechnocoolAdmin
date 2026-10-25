@@ -122,6 +122,22 @@ export class UserService {
     return updated;
   }
 
+  /**
+   * Admin action "Log out all devices": revokes every refresh token of the user and bumps the
+   * token version, so access tokens already issued stop working at the next request too.
+   */
+  async logoutAllDevices(actor: ActorContext, id: string): Promise<{ sessionsRevoked: number }> {
+    const target = await this.get(id);
+    const sessionsRevoked = await this.d.uow.transaction(async (r) => {
+      const revoked = await r.refreshTokens.revokeAllForUser(id, "logout_all_devices");
+      await r.users.revokeSessions(id);
+      await r.audit.record(actor, { action: "user.logout_all", entityType: "User", entityId: id, before: { username: target.username }, after: { sessionsRevoked: revoked } });
+      return revoked;
+    });
+    await this.d.cache.invalidateUser(id);
+    return { sessionsRevoked };
+  }
+
   /** Admin-only password reset. Unlocks the account and revokes all of the user's sessions. */
   async setPassword(actor: ActorContext, id: string, password: string): Promise<UserDetail> {
     const target = await this.get(id);

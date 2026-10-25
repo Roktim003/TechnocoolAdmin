@@ -176,12 +176,12 @@ export const poHandlers = {
     await o().amend(actorOf(ctx), poId, await ctx.body(AmendPoSchema));
     return { data: await detail(ctx, poId) };
   }),
-  email: authedRoute<IdParams>(ACTION("APPROVE"), async (ctx) => {
+  email: authedRoute<IdParams>({ ...ACTION("APPROVE"), rateLimit: "exports" }, async (ctx) => {
     const poId = id(ctx);
     const r = await o().email(actorOf(ctx), poId, await optionalBody(ctx, EmailPoSchema));
     return { status: 202, data: { jobId: r.jobId, to: r.to, status: "queued" }, headers: { Location: `/api/v1/documents/${r.jobId}` } };
   }),
-  documents: authedRoute<IdParams>({ ...VIEW, idempotent: false }, async (ctx) => {
+  documents: authedRoute<IdParams>({ ...VIEW, idempotent: false, rateLimit: "exports" }, async (ctx) => {
     const r = await o().document(actorOf(ctx), id(ctx));
     return { status: 202, data: { jobId: r.jobId, kind: "PURCHASE_ORDER", status: "queued" }, headers: { Location: `/api/v1/documents/${r.jobId}` } };
   }),

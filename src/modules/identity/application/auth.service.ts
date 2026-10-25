@@ -13,6 +13,7 @@ import type {
   PasswordHasher,
   PrincipalCache,
   RefreshTokenCodec,
+  SessionActivity,
   UnitOfWork,
 } from "./ports";
 
@@ -40,6 +41,8 @@ export interface AuthDeps {
   failures: LoginFailureCounter;
   cache: PrincipalCache;
   config: IdentityConfig;
+  /** Web idle timeout tracking (optional: without it web sessions never idle out). */
+  activity?: SessionActivity;
   now?: () => Date;
 }
 
@@ -68,7 +71,7 @@ export class AuthService {
       const failures = await this.d.failures.increment(username);
       if (failures > this.d.config.maxLoginFailures) {
         await history(null, "RATE_LIMITED");
-        throw new RateLimitError("Too many failed login attempts. Try again in a few minutes.");
+        throw new RateLimitError("Too many failed login attempts. Try again in a few minutes.", this.d.config.loginFailureWindowSeconds ?? 900);
       }
       await history(null, "UNKNOWN_USER");
       throw IdentityErrors.invalidCredentials();
@@ -127,6 +130,12 @@ export class AuthService {
     }
     if (record.expiresAt <= this.now()) throw IdentityErrors.refreshInvalid();
 
+    // Web sessions end after the idle timeout; the refresh itself counts as activity.
+    if (record.client === "web" && this.idleTtl() && this.d.activity && !(await this.d.activity.touch(record.familyId, this.idleTtl()))) {
+      await this.repos.refreshTokens.revokeFamily(record.familyId, "idle_timeout");
+      throw IdentityErrors.sessionIdle();
+    }
+
     const user = await this.repos.users.findById(record.userId);
     if (!user || user.status !== "ACTIVE" || user.lockedAt) {
       await this.repos.refreshTokens.revokeFamily(record.familyId, "user_inactive");
@@ -147,7 +156,24 @@ export class AuthService {
   async logout(rawToken: string | undefined): Promise<void> {
     if (!rawToken) return;
     const record = await this.repos.refreshTokens.findByHash(this.d.refreshCodec.hash(rawToken));
-    if (record) await this.repos.refreshTokens.revokeFamily(record.familyId, "logout");
+    if (record) {
+      await this.repos.refreshTokens.revokeFamily(record.familyId, "logout");
+      await this.d.activity?.end(record.familyId);
+    }
+  }
+
+  /** Idle timeout in seconds (0 = off). */
+  idleTtl(): number {
+    return (this.d.config.sessionIdleMinutes ?? 0) * 60;
+  }
+
+  /**
+   * Called for every cookie-authenticated (web) request: extends the session, or throws 401
+   * SESSION_IDLE when it has been idle longer than the timeout. Mobile (bearer) sessions are exempt.
+   */
+  async touchWebSession(sessionId: string | undefined): Promise<void> {
+    if (!sessionId || !this.idleTtl() || !this.d.activity) return;
+    if (!(await this.d.activity.touch(sessionId, this.idleTtl()))) throw IdentityErrors.sessionIdle();
   }
 
   async me(principal: Principal): Promise<{ user: UserDetail; role: Role }> {
@@ -176,7 +202,8 @@ export class AuthService {
       if (rotateFromId && !(await r.refreshTokens.markRotated(rotateFromId, created.id))) throw new RotationRace();
     });
 
-    const access = await this.d.accessTokens.issue({ sub: user.id, rid: role.id, pv: role.permissionVersion, tv: user.tokenVersion });
+    if (!rotateFromId && client === "web" && this.idleTtl()) await this.d.activity?.start(familyId, this.idleTtl());
+    const access = await this.d.accessTokens.issue({ sub: user.id, rid: role.id, pv: role.permissionVersion, tv: user.tokenVersion, sid: familyId });
     return { user, role, client, accessToken: access.token, accessTokenExpiresIn: access.expiresIn, refreshToken, refreshTokenExpiresAt };
   }
 }

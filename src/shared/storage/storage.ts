@@ -3,6 +3,7 @@ import {
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  ListObjectsV2Command,
   NoSuchKey,
   PutObjectCommand,
   S3Client,
@@ -73,18 +74,55 @@ class S3Storage implements StorageAdapter {
   }
 }
 
-const globalForStorage = globalThis as unknown as { storage?: StorageAdapter };
+const globalForStorage = globalThis as unknown as { storage?: StorageAdapter; s3?: S3Client };
 
-export function storage(): StorageAdapter {
-  if (!globalForStorage.storage) {
+/** The S3 client of the attachments bucket (S3_*). */
+export function storageClient(): S3Client {
+  if (!globalForStorage.s3) {
     const e = env();
-    const client = new S3Client({
+    globalForStorage.s3 = new S3Client({
       endpoint: e.S3_ENDPOINT,
       region: e.S3_REGION,
       forcePathStyle: e.S3_FORCE_PATH_STYLE,
       credentials: { accessKeyId: e.S3_ACCESS_KEY_ID, secretAccessKey: e.S3_SECRET_ACCESS_KEY },
     });
-    globalForStorage.storage = new S3Storage(client, e.S3_BUCKET, e.S3_AUTO_CREATE_BUCKET);
+  }
+  return globalForStorage.s3;
+}
+
+export function storage(): StorageAdapter {
+  if (!globalForStorage.storage) {
+    const e = env();
+    globalForStorage.storage = new S3Storage(storageClient(), e.S3_BUCKET, e.S3_AUTO_CREATE_BUCKET);
   }
   return globalForStorage.storage;
+}
+
+/** Readiness: the attachments bucket answers. */
+export async function probeStorage(): Promise<void> {
+  await storageClient().send(new HeadBucketCommand({ Bucket: env().S3_BUCKET }));
+}
+
+export interface StoredObject {
+  key: string;
+  size: number;
+  etag?: string;
+}
+
+/** Every object in a bucket (paged), optionally under a prefix. */
+export async function listObjects(client: S3Client, bucket: string, prefix?: string): Promise<StoredObject[]> {
+  const out: StoredObject[] = [];
+  let token: string | undefined;
+  do {
+    const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+    for (const o of page.Contents ?? []) if (o.Key) out.push({ key: o.Key, size: Number(o.Size ?? 0), etag: o.ETag });
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  return out;
+}
+
+/** Objects and bytes in the attachments bucket (System health). */
+export async function storageUsage(): Promise<{ objects: number; bytes: number }> {
+  const all = await listObjects(storageClient(), env().S3_BUCKET);
+  return { objects: all.length, bytes: all.reduce((n, o) => n + o.size, 0) };
 }
