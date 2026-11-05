@@ -37,7 +37,7 @@ export async function seedSampleProjects(prisma: PrismaClient, log: (msg: string
   const costing = new ProjectCostingService({ store: () => uow.store, stock });
   const projects = new ProjectService({ uow, costing, stock });
   const costs = new CostService({ uow, projects });
-  const actor: ProjectsActor = { actorId: admin.id, name: admin.name, ip: null, requestId: "seed", level: "FULL", inventoryLevel: "FULL", purchasingLevel: "FULL", warehouseIds: admin.warehouses.map((w) => w.warehouseId), canSeeCost: true, canSeeMargin: true, isAdmin: true };
+  const actor: ProjectsActor = { actorId: admin.id, name: admin.name, ip: null, requestId: "seed", level: "FULL", inventoryLevel: "FULL", purchasingLevel: "FULL", overheadsLevel: "FULL", warehouseIds: admin.warehouses.map((w) => w.warehouseId), canSeeCost: true, canSeeMargin: true, canSeeOverheads: true, isAdmin: true };
   const inv: InventoryActor = { actorId: admin.id, name: admin.name, ip: null, requestId: "seed", level: "FULL", warehouseIds: actor.warehouseIds, canSeeCost: true, canSeeProfit: true, isAdmin: true };
   const entries = new EntryService({ uow: prismaInventoryUnitOfWork(prisma), posting: new StockPostingService() });
 

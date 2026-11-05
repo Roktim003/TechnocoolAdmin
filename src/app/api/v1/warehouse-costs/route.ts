@@ -1,0 +1,4 @@
+import { warehouseCostHandlers as h } from "@/modules/overheads/interface/http";
+
+export const GET = h.list;
+export const POST = h.create;

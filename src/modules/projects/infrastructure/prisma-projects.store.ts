@@ -45,6 +45,7 @@ function toProject(p: ProjectRow): ProjectRecord {
     closedBy: p.closedBy,
     closeReason: p.closeReason,
     costAlertLevel: p.costAlertLevel,
+    fullCostAlertLevel: p.fullCostAlertLevel,
     createdBy: p.createdBy,
     isActive: p.isActive,
     createdAt: p.createdAt,
@@ -52,7 +53,7 @@ function toProject(p: ProjectRow): ProjectRecord {
   };
 }
 
-const costInclude = { createdBy: ref, voidedBy: ref } satisfies Prisma.ProjectCostInclude;
+const costInclude = { createdBy: ref, updatedBy: ref, voidedBy: ref } satisfies Prisma.ProjectCostInclude;
 type CostRow = Prisma.ProjectCostGetPayload<{ include: typeof costInclude }>;
 
 const toCost = (c: CostRow, attachmentCount = 0): CostRecord => ({
@@ -64,7 +65,12 @@ const toCost = (c: CostRow, attachmentCount = 0): CostRecord => ({
   amount: c.amount.toFixed(2),
   vendorOrPayee: c.vendorOrPayee,
   referenceNo: c.referenceNo,
+  periodFrom: dateOnly(c.periodFrom),
+  periodTo: dateOnly(c.periodTo),
+  basisNote: c.basisNote,
   createdBy: c.createdBy,
+  updatedBy: c.updatedBy,
+  updatedAt: c.updatedAt,
   voidedAt: c.voidedAt,
   voidedBy: c.voidedBy,
   voidReason: c.voidReason,
@@ -83,6 +89,16 @@ function listWhere(f: Omit<ProjectListFilters, "status"> & { status?: ProjectSta
     ...(q ? { OR: (["code", "name", "clientName"] as const).map((k) => ({ [k]: { contains: q, mode: "insensitive" as const } })) } : {}),
   };
 }
+
+/** Audit actions about one cost line (direct costs and overheads). */
+export const COST_AUDIT_ACTIONS = ["project.cost_add", "project.cost_void", "project.overhead_add", "project.overhead_edit", "project.overhead_void"] as const;
+
+const costData = <T extends { date: string; periodFrom: string | null; periodTo: string | null }>(data: T) => ({
+  ...data,
+  date: new Date(`${data.date}T00:00:00Z`),
+  periodFrom: toDate(data.periodFrom),
+  periodTo: toDate(data.periodTo),
+});
 
 const writeData = (data: object) => {
   const out: Record<string, unknown> = { ...data };
@@ -168,8 +184,24 @@ export function prismaProjectsStore(db: Db): ProjectsStore {
       return rows.length ? store.cost(id) : null;
     },
     async addCost(data) {
-      const c = await db.projectCost.create({ data: { ...data, date: new Date(`${data.date}T00:00:00Z`) } });
+      const c = await db.projectCost.create({ data: costData(data) });
       return c.id;
+    },
+    async updateCost(id, data) {
+      await db.projectCost.update({ where: { id }, data: costData(data) });
+    },
+    async costAudit(projectId, costId) {
+      const rows = await db.auditLog.findMany({
+        where: {
+          entityType: "Project",
+          entityId: projectId,
+          action: { in: [...COST_AUDIT_ACTIONS] },
+          OR: [{ after: { path: ["costId"], equals: costId } }, { before: { path: ["costId"], equals: costId } }],
+        },
+        include: { user: ref },
+        orderBy: { createdAt: "asc" },
+      });
+      return rows.map((r) => ({ id: r.id, action: r.action, at: r.createdAt, by: r.user, before: (r.before as Record<string, unknown> | null) ?? null, after: (r.after as Record<string, unknown> | null) ?? null }));
     },
     async voidCost(id, data) {
       await db.projectCost.update({ where: { id }, data: { ...data, voidedAt: new Date() } });

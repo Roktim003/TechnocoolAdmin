@@ -44,3 +44,16 @@ export async function processImage(bytes: Uint8Array, label = "file"): Promise<P
   const thumbnail = await sharp(bytes).rotate().resize(THUMBNAIL_SIZE, THUMBNAIL_SIZE, { fit: "inside", withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
   return { original: bytes, contentType: kind.contentType, ext: kind.ext, width: meta.width, height: meta.height, thumbnail: new Uint8Array(thumbnail) };
 }
+
+/**
+ * The same 400px WebP thumbnail for an image already checked by content (any size limit is the
+ * caller's). Returns null when sharp can't decode it.
+ */
+export async function makeThumbnail(bytes: Uint8Array): Promise<Uint8Array | null> {
+  try {
+    const out = await sharp(bytes).rotate().resize(THUMBNAIL_SIZE, THUMBNAIL_SIZE, { fit: "inside", withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+    return new Uint8Array(out);
+  } catch {
+    return null;
+  }
+}

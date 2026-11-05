@@ -100,6 +100,71 @@ export function resolveDate(value: string, now: Date = new Date()): string | nul
   }
 }
 
+/** Relative months allowed in month filters (resolved at run time, like the date tokens). */
+export const MONTH_TOKENS = {
+  thisMonth: "This month",
+  lastMonth: "Last month",
+  "-2m": "2 months ago",
+  "-5m": "5 months ago",
+  "-11m": "11 months ago",
+  fiscalYearStart: "Start of this fiscal year (July)",
+} as const;
+export type MonthToken = keyof typeof MONTH_TOKENS;
+
+export const isMonthToken = (v: string): v is MonthToken => Object.prototype.hasOwnProperty.call(MONTH_TOKENS, v);
+
+const monthStr = (y: number, m0: number) => new Date(Date.UTC(y, m0, 1)).toISOString().slice(0, 10);
+
+/**
+ * A month filter value as "YYYY-MM-01": a month ("2026-11"), a date in it ("2026-11-17") or a
+ * relative month token (Asia/Dhaka). Null for anything else.
+ */
+export function resolveMonth(value: string, now: Date = new Date()): string | null {
+  const v = value.trim();
+  const m = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(v);
+  if (m) {
+    const month = Number(m[2]);
+    if (month < 1 || month > 12) return null;
+    if (m[3] && Number.isNaN(Date.parse(`${v}T00:00:00Z`))) return null;
+    return `${m[1]}-${m[2]}-01`;
+  }
+  if (!isMonthToken(v)) return null;
+  const [y, mo] = dhakaDate(now).split("-").map(Number) as [number, number];
+  const m0 = mo - 1;
+  switch (v) {
+    case "thisMonth":
+      return monthStr(y, m0);
+    case "lastMonth":
+      return monthStr(y, m0 - 1);
+    case "-2m":
+      return monthStr(y, m0 - 2);
+    case "-5m":
+      return monthStr(y, m0 - 5);
+    case "-11m":
+      return monthStr(y, m0 - 11);
+    case "fiscalYearStart":
+      // Fiscal year July–June: July of this year from July on, else July of last year.
+      return monthStr(mo >= 7 ? y : y - 1, 6);
+  }
+}
+
+/** Months from `from` to `to` (both YYYY-MM-01), inclusive. */
+export function monthCount(from: string, to: string): number {
+  const [fy, fm] = from.split("-").map(Number) as [number, number];
+  const [ty, tm] = to.split("-").map(Number) as [number, number];
+  return (ty - fy) * 12 + (tm - fm) + 1;
+}
+
+/** The last day of a month (YYYY-MM-01 → YYYY-MM-DD). */
+export const monthEnd = (month: string) => {
+  const [y, m] = month.split("-").map(Number) as [number, number];
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+};
+
+const monthFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", month: "short", year: "numeric" });
+/** "2026-11-01" → "Nov 2026". */
+export const monthLabel = (month: string) => monthFmt.format(new Date(`${month.slice(0, 7)}-01T00:00:00Z`));
+
 /** True when the Dhaka-local calendar day matches the schedule's day rule. */
 function dayMatches(t: ScheduleTiming, y: number, m: number, d: number, dow: number): boolean {
   if (t.frequency === "DAILY") return true;

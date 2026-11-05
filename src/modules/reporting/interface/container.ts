@@ -15,7 +15,9 @@ import { ExportService, ReportFiles } from "../application/export.service";
 import type { AuditSink, ExportJobData, ExportJobState, ExportQueue, FileStore, ReportMailer, ViewerSource } from "../application/ports";
 import { ReportService } from "../application/report.service";
 import { ScheduleService } from "../application/schedule.service";
+import type { SensitiveFlags } from "@/shared/rbac/levels";
 import type { ReportViewer } from "../domain/types";
+import { reportFlags } from "../domain/visibility";
 import { dashboardQueries, redisDashboardCache } from "../infrastructure/dashboard-queries";
 import { reportFileWriter } from "../infrastructure/file-writer";
 import { prismaLookups } from "../infrastructure/lookups";
@@ -49,9 +51,12 @@ const fileStore: FileStore = {
   },
 };
 
-/** A principal's report view (the same shape the API, exports and schedules use). */
-export function viewerOf(p: { userId: string; name: string; isAdmin: boolean; permissions: ReportViewer["permissions"]; flags: ReportViewer["flags"]; warehouseIds: string[] }): ReportViewer {
-  return { userId: p.userId, name: p.name, isAdmin: p.isAdmin, permissions: p.permissions, flags: p.flags, warehouseIds: [...p.warehouseIds] };
+/**
+ * A principal's report view (the same shape the API, exports and schedules use). Overhead access
+ * (overheads ≥ VIEW + seeCost) becomes `flags.overheads` here, once.
+ */
+export function viewerOf(p: { userId: string; name: string; isAdmin: boolean; permissions: ReportViewer["permissions"]; flags: SensitiveFlags; warehouseIds: string[] }): ReportViewer {
+  return { userId: p.userId, name: p.name, isAdmin: p.isAdmin, permissions: p.permissions, flags: reportFlags(p), warehouseIds: [...p.warehouseIds] };
 }
 
 const viewers: ViewerSource = {

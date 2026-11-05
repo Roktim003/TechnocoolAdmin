@@ -1,13 +1,21 @@
 import { parseSort, pageMeta, type SortField } from "@/shared/pagination/list-query";
 import { hasLevel } from "@/shared/rbac/levels";
 import { ReportErrors } from "../domain/errors";
-import type { ColumnDef, ReportRow, ReportViewer, TotalDef } from "../domain/types";
-import { chartVisible, stripRow, stripTotals, visibleColumns, visibleTotals } from "../domain/visibility";
+import type { ColumnDef, ReportFlags, ReportRow, ReportViewer, TotalDef } from "../domain/types";
+import { canSee, chartVisible, seesOverheads, stripRow, stripTotals, visibleColumns, visibleTotals } from "../domain/visibility";
 import { cleanParams, filterLines, parseParams } from "./params";
 import type { FilterLine, Lookups, ParsedParams, ReportDefinition, ReportRegistry, RunContext, RunOutput, WarehouseRef } from "./ports";
 
 export const SCREEN_MAX_PAGE_SIZE = 200;
 export const DEFAULT_PAGE_SIZE = 50;
+
+/** Audit record types only overhead viewers may see (see the audit log report). */
+const OVERHEAD_RECORD_TYPES = new Set(["WarehouseCost"]);
+
+/** True when the viewer may see / run the report at all (report-level `requires`). */
+export const canRun = (def: ReportDefinition, flags: ReportFlags) => !def.requires || canSee(def.requires, flags);
+
+const totalsOf = (def: ReportDefinition, flags: ReportFlags) => (typeof def.totals === "function" ? def.totals(flags) : def.totals);
 
 /** A report ready to run for one viewer: validated filters, scope and the columns they may see. */
 export interface PreparedReport {
@@ -39,24 +47,36 @@ export class ReportService {
     return !!def.rowAction && (!r || hasLevel(viewer.permissions[r[0]], r[1]));
   }
 
-  /** Every report with its filters, the columns / totals / chart this viewer would get. */
-  async catalog(viewer: ReportViewer) {
-    const warehouses = await this.d.lookups.warehouses(viewer.warehouseIds);
-    return this.d.registry.all().map((def) => ({
-      ...def.meta,
-      params: def.params,
-      sortFields: def.sortFields,
-      defaultSort: def.defaultSort,
-      columns: visibleColumns(def.columns(warehouses), viewer.flags),
-      totals: visibleTotals(def.totals, viewer.flags),
-      chart: def.chart?.(viewer.flags) ?? null,
-      rowAction: this.rowActionAllowed(def, viewer) ? def.rowAction! : null,
-    }));
+  /** The reports this viewer may run (reports needing e.g. overhead access are left out without it). */
+  available(viewer: ReportViewer): ReportDefinition[] {
+    return this.d.registry.all().filter((def) => canRun(def, viewer.flags));
   }
 
-  /** Validates filters and scope. A warehouse outside the viewer's scope is a 403, never an empty report. */
+  /** Every report this viewer may run, with its filters and the columns / totals / chart they would get. */
+  async catalog(viewer: ReportViewer) {
+    const warehouses = await this.d.lookups.warehouses(viewer.warehouseIds);
+    return this.available(viewer).map((def) => {
+      const chart = def.chart?.(viewer.flags) ?? null;
+      return {
+        ...def.meta,
+        params: def.params,
+        sortFields: def.sortFields,
+        defaultSort: def.defaultSort,
+        columns: visibleColumns(def.columns(warehouses, viewer.flags), viewer.flags),
+        totals: visibleTotals(totalsOf(def, viewer.flags), viewer.flags),
+        chart: chart && canSee(chart.requires, viewer.flags) ? chart : null,
+        rowAction: this.rowActionAllowed(def, viewer) ? def.rowAction! : null,
+      };
+    });
+  }
+
+  /**
+   * Validates access, filters and scope. A report needing flags the viewer lacks (e.g. overhead
+   * access) is a 403; so is a warehouse outside the viewer's scope (never an empty report).
+   */
   async prepare(viewer: ReportViewer, id: string, input: Record<string, unknown>, sortRaw?: string): Promise<PreparedReport> {
     const def = this.definition(id);
+    if (!canRun(def, viewer.flags)) throw ReportErrors.reportForbidden();
     const raw = cleanParams(def.params, input);
     const now = this.now();
     const params = parseParams(def.params, raw, now);
@@ -69,8 +89,8 @@ export class ReportService {
       raw,
       params,
       ctx: { viewer, scope: chosen ? [chosen] : [...viewer.warehouseIds], warehouses, now },
-      columns: visibleColumns(def.columns(warehouses), viewer.flags),
-      totalDefs: visibleTotals(def.totals, viewer.flags),
+      columns: visibleColumns(def.columns(warehouses, viewer.flags), viewer.flags),
+      totalDefs: visibleTotals(totalsOf(def, viewer.flags), viewer.flags),
       sort: parseSort(sortRaw, def.sortFields, def.defaultSort),
       rowActionAllowed: this.rowActionAllowed(def, viewer),
     };
@@ -121,8 +141,10 @@ export class ReportService {
     return filterLines(p.def.params, p.raw, p.params, p.ctx.warehouses as WarehouseRef[], this.d.lookups);
   }
 
-  options(viewer: ReportViewer) {
-    return this.d.lookups.options(viewer.warehouseIds);
+  /** Filter options; overhead record types (audit log) only for overhead viewers. */
+  async options(viewer: ReportViewer) {
+    const o = await this.d.lookups.options(viewer.warehouseIds);
+    return seesOverheads(viewer.flags) ? o : { ...o, recordTypes: o.recordTypes.filter((t) => !OVERHEAD_RECORD_TYPES.has(t)) };
   }
 
   products(q: string) {

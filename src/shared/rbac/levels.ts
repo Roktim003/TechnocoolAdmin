@@ -3,7 +3,7 @@
  * Values mirror the Prisma enums `ModuleKey` and `PermissionLevel`.
  */
 
-export const MODULE_KEYS = ["dashboard", "catalog", "inventory", "purchasing", "projects", "reports", "users"] as const;
+export const MODULE_KEYS = ["dashboard", "catalog", "inventory", "purchasing", "projects", "reports", "users", "overheads"] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
 /** Ordered from lowest to highest. */
@@ -24,6 +24,7 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   projects: "Projects",
   reports: "Reports",
   users: "Users & roles",
+  overheads: "Overheads",
 };
 
 export const FLAG_LABELS: Record<SensitiveFlag, string> = {
@@ -43,6 +44,14 @@ export function hasLevel(actual: PermissionLevel | undefined, required: Permissi
 
 export function emptyPermissionMap(level: PermissionLevel = "NONE"): PermissionMap {
   return Object.fromEntries(MODULE_KEYS.map((m) => [m, level])) as PermissionMap;
+}
+
+/**
+ * Overhead amounts (store charge, holding, established cost) are visible only with
+ * overheads ≥ VIEW **and** seeCost.
+ */
+export function canSeeOverheads(user: { permissions: Partial<PermissionMap>; flags: Pick<SensitiveFlags, "seeCost"> }): boolean {
+  return hasLevel(user.permissions.overheads, "VIEW") && user.flags.seeCost;
 }
 
 export function isModuleKey(v: string): v is ModuleKey {

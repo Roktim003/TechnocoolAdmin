@@ -5,14 +5,14 @@
 }
 
 .notice {
-  margin-bottom: var(--space-5);
+  margin-bottom: var(--s-4);
 }
 
 .panel {
-  margin-top: var(--space-5);
+  margin-top: var(--s-5);
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: var(--s-5);
   min-width: 0;
 }
 
@@ -21,7 +21,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--space-4);
+  gap: var(--s-3);
   width: 100%;
 }
 
@@ -42,39 +42,51 @@
   border: none;
   background: transparent;
   font: inherit;
-  font-weight: var(--weight-semibold);
+  font-weight: inherit;
   color: inherit;
   cursor: pointer;
   white-space: nowrap;
+}
+
+.sortButton:hover {
+  color: var(--text);
+}
+
+.sortButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--r-xs);
 }
 
 /* Cells */
 .nameCell {
   display: flex;
   flex-direction: column;
-  color: var(--color-text-primary);
+  gap: 1px;
+  color: var(--text);
 }
 
 .subtle {
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
 }
 
 .mono {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
 }
 
 .tags {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--s-1);
 }
 
 .rowActions {
   display: flex;
   justify-content: flex-end;
-  gap: var(--space-1);
+  gap: var(--s-1);
   white-space: nowrap;
 }
 
@@ -86,7 +98,7 @@
 .formGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-6) var(--space-5);
+  gap: var(--s-4) var(--s-4);
 }
 
 .full {
@@ -96,14 +108,17 @@
 .checkboxes {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3) var(--space-6);
+  gap: var(--s-2) var(--s-5);
 }
 
-/* Section tiles */
+/* Section tiles (panels) */
 .tile {
-  background: var(--color-surface);
-  padding: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 14px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .tileHeader {
@@ -111,140 +126,181 @@
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
-  margin-bottom: var(--space-5);
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
 }
 
 .sectionTitle {
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
 }
 
 .sectionHelp {
-  margin-top: var(--space-2);
-  color: var(--color-text-secondary);
+  margin: 2px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
 }
 
-/* Role matrix */
+/* Role matrix — flush with the panel edges */
 .matrixScroll {
   overflow-x: auto;
+  margin: 0 -14px -14px;
+  border-top: 1px solid var(--border);
+}
+
+.matrixScroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .matrix {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--text-md);
+  font-size: var(--fs);
 }
 
 .matrix th,
 .matrix td {
-  height: 48px;
-  padding: 0 var(--space-5);
+  height: var(--row-h);
+  padding: 0 14px;
   text-align: left;
   white-space: nowrap;
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--divider);
 }
 
 .matrix thead th {
-  background: var(--color-selected);
+  height: 34px;
+  background: var(--sunken);
   border-top: none;
-  font-weight: var(--weight-semibold);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.matrix tbody tr:first-child th,
+.matrix tbody tr:first-child td {
+  border-top: none;
 }
 
 .matrix tbody th {
-  font-weight: var(--weight-regular);
-  color: var(--color-text-primary);
+  font-weight: 400;
+  color: var(--text);
 }
 
 .matrix td {
-  color: var(--color-text-secondary);
+  color: var(--text-3);
+}
+
+.matrix tbody tr:hover th,
+.matrix tbody tr:hover td {
+  background: var(--surface-2);
 }
 
 .flagRow th,
 .flagRow td {
-  background: var(--color-background);
+  background: var(--sunken);
 }
 
 .yes {
-  color: var(--color-success-tag-text);
-  font-weight: var(--weight-semibold);
+  color: var(--green);
+  font-weight: 500;
 }
 
 /* Role editor */
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: 6px;
 }
 
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-3);
-  min-height: 32px;
-  padding: 0 var(--space-4);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-pill);
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-  font-size: var(--text-md);
+  gap: var(--s-2);
+  height: var(--h-md);
+  padding: 0 6px 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
   cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 .chip:hover {
-  background: var(--color-layer-hover);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .chipSelected,
 .chipSelected:hover {
-  background: var(--color-text-primary);
-  border-color: var(--color-text-primary);
-  color: var(--color-text-on-color);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent);
 }
 
 .chipCount {
   display: inline-grid;
   place-items: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-pill);
-  background: var(--color-gray-tag-bg);
-  color: var(--color-gray-tag-text);
-  font-size: var(--text-xs);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  background: var(--gray-soft);
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .chipSelected .chipCount {
-  background: var(--color-text-secondary);
-  color: var(--color-text-on-color);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .editor {
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
-  margin-top: var(--space-6);
-  padding-top: var(--space-6);
-  border-top: 1px solid var(--color-border);
+  gap: var(--s-5);
+  margin-top: var(--s-4);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--divider);
+}
+
+/* In this column flex the toolbar flex-basis would become a 200px height. */
+.editor > .filterField {
+  flex: none;
+  max-width: 320px;
 }
 
 .levelGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--space-5);
+  gap: var(--s-4);
 }
 
 .editorActions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--s-2);
   justify-content: space-between;
 }
 
 .filters {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-4);
+  gap: var(--s-3);
   width: 100%;
 }
 

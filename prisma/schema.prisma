@@ -30,6 +30,7 @@ enum ModuleKey {
   projects
   reports
   users
+  overheads
 }
 
 /// Ordered: NONE < VIEW < CREATE < APPROVE < FULL
@@ -77,6 +78,7 @@ model Warehouse {
   projects        Project[]
   serials         SerialNumber[]
   purchaseOrders  PurchaseOrder[]
+  overheadCosts   WarehouseCost[]
 }
 
 model Role {
@@ -161,12 +163,16 @@ model User {
   poRevisions  PurchaseOrderRevision[]
 
   // projects
-  projectsEngineered   Project[]              @relation("ProjectSiteEngineer")
-  projectsClosed       Project[]              @relation("ProjectClosedBy")
-  projectsCreated      Project[]              @relation("ProjectCreatedBy")
-  projectCostsCreated  ProjectCost[]          @relation("ProjectCostCreatedBy")
-  projectCostsVoided   ProjectCost[]          @relation("ProjectCostVoidedBy")
-  projectStatusChanges ProjectStatusHistory[]
+  projectsEngineered    Project[]              @relation("ProjectSiteEngineer")
+  projectsClosed        Project[]              @relation("ProjectClosedBy")
+  projectsCreated       Project[]              @relation("ProjectCreatedBy")
+  projectCostsCreated   ProjectCost[]          @relation("ProjectCostCreatedBy")
+  projectCostsUpdated   ProjectCost[]          @relation("ProjectCostUpdatedBy")
+  projectCostsVoided    ProjectCost[]          @relation("ProjectCostVoidedBy")
+  warehouseCostsCreated WarehouseCost[]        @relation("WarehouseCostCreatedBy")
+  warehouseCostsUpdated WarehouseCost[]        @relation("WarehouseCostUpdatedBy")
+  warehouseCostsVoided  WarehouseCost[]        @relation("WarehouseCostVoidedBy")
+  projectStatusChanges  ProjectStatusHistory[]
 
   // reporting
   reportSchedules ReportSchedule[]
@@ -447,6 +453,10 @@ enum ProjectCostCategory {
   LABOUR
   TRANSPORT
   OTHER
+  /// Overheads (manual amounts; never part of stock value)
+  STORE_CHARGE
+  HOLDING
+  ESTABLISHMENT
 }
 
 enum StockEntryType {
@@ -581,6 +591,8 @@ model Project {
   closeReason         String?
   /// Highest cost-used threshold already alerted (0, 90 or 100); re-arms when cost falls back below it.
   costAlertLevel      Int           @default(0)
+  /// Highest cost alert sent on full cost (direct + overheads), for recipients who can see overheads.
+  fullCostAlertLevel  Int           @default(0)
   createdById         String?       @db.Uuid
   isActive            Boolean       @default(true)
   createdAt           DateTime      @default(now())
@@ -610,7 +622,13 @@ model ProjectCost {
   amount        Decimal             @db.Decimal(14, 2)
   vendorOrPayee String?
   referenceNo   String?
+  /// Overheads: the months the charge covers (optional; first and last day).
+  periodFrom    DateTime?           @db.Date
+  periodTo      DateTime?           @db.Date
+  /// Overheads: how the amount was worked out (information only).
+  basisNote     String?
   createdById   String              @db.Uuid
+  updatedById   String?             @db.Uuid
   voidedAt      DateTime?
   voidedById    String?             @db.Uuid
   voidReason    String?
@@ -619,9 +637,54 @@ model ProjectCost {
 
   project   Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
   createdBy User    @relation("ProjectCostCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy User?   @relation("ProjectCostUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
   voidedBy  User?   @relation("ProjectCostVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
 
   @@index([projectId, date])
+  @@index([projectId, category])
+}
+
+enum WarehouseCostScope {
+  WAREHOUSE
+  COMPANY
+}
+
+enum WarehouseCostCategory {
+  STORE_CHARGE
+  HOLDING
+  ESTABLISHMENT
+}
+
+/// What was actually spent on overheads per month: store charge / holding per warehouse,
+/// established cost company-wide. Never changes stock value. Several lines per month allowed.
+model WarehouseCost {
+  id            String                @id @default(uuid()) @db.Uuid
+  scope         WarehouseCostScope
+  /// Required for WAREHOUSE scope, null for COMPANY.
+  warehouseId   String?               @db.Uuid
+  category      WarehouseCostCategory
+  /// First day of the month.
+  month         DateTime              @db.Date
+  amount        Decimal               @db.Decimal(14, 2)
+  description   String
+  vendorOrPayee String?
+  referenceNo   String?
+  createdById   String                @db.Uuid
+  updatedById   String?               @db.Uuid
+  voidedAt      DateTime?
+  voidedById    String?               @db.Uuid
+  voidReason    String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  createdBy User       @relation("WarehouseCostCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy User?      @relation("WarehouseCostUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  voidedBy  User?      @relation("WarehouseCostVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+
+  @@index([warehouseId, month, category])
+  @@index([scope, month])
+  @@index([month])
 }
 
 model ProjectStatusHistory {
@@ -651,12 +714,14 @@ model DocumentSequence {
 
 /// Single row (id = 1).
 model InventorySettings {
-  id                         Int      @id @default(1)
-  defaultSalesVatPercent     Decimal  @default(15) @db.Decimal(5, 2)
-  adminWriteOffNeedsApproval Boolean  @default(false)
-  allowAdminBelowCostSale    Boolean  @default(true)
-  fiscalYearStartMonth       Int      @default(7)
-  updatedAt                  DateTime @updatedAt
+  id                         Int             @id @default(1)
+  defaultSalesVatPercent     Decimal         @default(15) @db.Decimal(5, 2)
+  adminWriteOffNeedsApproval Boolean         @default(false)
+  allowAdminBelowCostSale    Boolean         @default(true)
+  fiscalYearStartMonth       Int             @default(7)
+  /// Import documents that need a number and at least one file before a GRN (Imported) can be posted.
+  importDocsRequiredToPost   ImportDocType[] @default([CI, BOE])
+  updatedAt                  DateTime        @updatedAt
 }
 
 model StockEntry {
@@ -685,7 +750,6 @@ model StockEntry {
   poNumberText      String?
   supplierInvoiceNo String?
   lcNo              String?
-  billOfEntryNo     String?
   challanNo         String?
   siteAddress       String?
   receivedBy        String?
@@ -738,13 +802,15 @@ model StockEntry {
   receivedByUser User?          @relation("EntryReceivedBy", fields: [receivedById], references: [id], onDelete: Restrict)
   purchaseOrder  PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
 
-  lines        StockEntryLine[]
-  charges      LandedCostCharge[]
-  movements    StockMovement[]
-  reservations StockReservation[]
-  inTransit    StockInTransit[]
-  serialMoves  SerialMovement[]
-  stockCount   StockCount?
+  lines          StockEntryLine[]
+  charges        LandedCostCharge[]
+  movements      StockMovement[]
+  reservations   StockReservation[]
+  inTransit      StockInTransit[]
+  serialMoves    SerialMovement[]
+  stockCount     StockCount?
+  /// GRN (Imported): the shipment documents (BL, CO, PL, CI, B/E).
+  importShipment ImportShipment?
 
   @@index([type, status])
   @@index([status])
@@ -784,6 +850,8 @@ model StockEntryLine {
   adjustDirection     AdjustmentDirection?
   /// GRN lines received against a purchase order line.
   purchaseOrderLineId String?              @db.Uuid
+  /// GRN (Imported): defaults from the product, else the Certificate of Origin.
+  countryOfOrigin     String?
   note                String?
 
   entry        StockEntry         @relation(fields: [entryId], references: [id], onDelete: Cascade)
@@ -970,20 +1038,90 @@ model EntryLineSerial {
 
 /// Generic file attachment (stock entries now; purchases and projects later).
 model Attachment {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String         @id @default(uuid()) @db.Uuid
   entityType   String
-  entityId     String   @db.Uuid
+  entityId     String         @db.Uuid
   fileKey      String
   fileName     String
   mimeType     String
   size         Int
   label        String?
-  uploadedById String   @db.Uuid
-  createdAt    DateTime @default(now())
+  /// Import documents of a GRN (Imported); null for ordinary attachments.
+  docType      ImportDocType?
+  /// WebP thumbnail of an image import document.
+  thumbnailKey String?
+  uploadedById String         @db.Uuid
+  createdAt    DateTime       @default(now())
 
   uploadedBy User @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
 
   @@index([entityType, entityId])
+  @@index([entityType, entityId, docType])
+}
+
+enum ImportDocType {
+  BL
+  CO
+  PL
+  CI
+  BOE
+  OTHER
+}
+
+enum Incoterm {
+  EXW
+  FOB
+  CFR
+  CIF
+  OTHER
+}
+
+/// The five shipment documents of a GRN (Imported), 1:1 with the entry.
+model ImportShipment {
+  id                 String        @id @default(uuid()) @db.Uuid
+  entryId            String        @unique @db.Uuid
+  // Bill of Lading
+  blNo               String?
+  blDate             DateTime?     @db.Date
+  shippingLine       String?
+  vesselVoyage       String?
+  portOfLoading      String?
+  portOfDischarge    String?
+  containerNumbers   String[]      @default([])
+  // Certificate of Origin
+  coNo               String?
+  coDate             DateTime?     @db.Date
+  countryOfOrigin    String?
+  coIssuingAuthority String?
+  // Packing List
+  plNo               String?
+  plDate             DateTime?     @db.Date
+  packageCount       Int?
+  grossWeightKg      Decimal?      @db.Decimal(14, 3)
+  netWeightKg        Decimal?      @db.Decimal(14, 3)
+  // Commercial Invoice (ciValue is a cost: hidden without seeCost)
+  ciNo               String?
+  ciDate             DateTime?     @db.Date
+  ciCurrency         CurrencyCode?
+  ciValue            Decimal?      @db.Decimal(14, 2)
+  incoterm           Incoterm?
+  // Bill of Entry
+  boeNo              String?
+  boeDate            DateTime?     @db.Date
+  customsStation     String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  entry StockEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([blNo])
+  @@index([ciNo])
+  @@index([boeNo])
+  @@index([coNo])
+  @@index([plNo])
+  @@index([countryOfOrigin])
+  @@index([customsStation])
+  @@index([containerNumbers], type: Gin)
 }
 
 /**

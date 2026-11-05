@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Chart } from "@/components/charts/Chart";
+import { Icon, type IconName } from "@/components/ui/Icon";
 import { Tag } from "@/components/ui/Tag";
 import type { ChartWidget, KpiWidget, ListWidget, Widget } from "@/modules/reporting/application/dashboard.service";
 import styles from "./dashboard.module.css";
@@ -9,13 +10,44 @@ import styles from "./dashboard.module.css";
 const money = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const count = new Intl.NumberFormat("en-IN");
 
+/** One icon per KPI id; unknown ids fall back to a chart icon. */
+const KPI_ICONS: Record<string, IconName> = {
+  "stock-value": "package",
+  "low-stock": "alert",
+  "my-approvals": "checkCircle",
+  "open-pos": "fileText",
+  "overdue-pos": "clock",
+  "running-projects": "kanban",
+  transfers: "truck",
+  // Overhead access only (overheads ≥ VIEW + seeCost).
+  overheadsThisMonth: "archive",
+  overheadsNotCharged: "clipboard",
+};
+
+/** Gr8r stat tile: icon + label, big tabular value, quiet caption. Warning / danger add a soft badge. */
 function Kpi({ w }: { w: KpiWidget }) {
-  const value = w.valueType === "money" ? `৳ ${money.format(Number(w.value))}` : count.format(Number(w.value));
+  const n = Number(w.value);
   return (
     <Link href={w.link} className={[styles.kpi, styles[w.tone]].join(" ")}>
-      <span className={styles.kpiTitle}>{w.title}</span>
-      <span className={styles.kpiValue}>{value}</span>
-      {w.caption ? <span className={styles.kpiCaption}>{w.caption}</span> : null}
+      <span className={styles.kpiHead}>
+        <Icon name={KPI_ICONS[w.id] ?? "chart"} size={14} className={styles.kpiIcon} />
+        <span className={styles.kpiTitle}>{w.title}</span>
+        <Icon name="arrowUpRight" size={14} className={styles.kpiArrow} />
+      </span>
+      <span className={styles.kpiValue}>
+        {w.valueType === "money" ? (
+          <>
+            <span className={styles.kpiCurrency}>৳</span>
+            {money.format(n)}
+          </>
+        ) : (
+          count.format(n)
+        )}
+      </span>
+      <span className={styles.kpiFoot}>
+        {w.tone !== "default" ? <span className={styles.kpiFlag}>{w.tone === "danger" ? "Overdue" : "Needs review"}</span> : null}
+        {w.caption ? <span className={styles.kpiCaption}>{w.caption}</span> : null}
+      </span>
     </Link>
   );
 }
@@ -26,7 +58,8 @@ function ChartTile({ w }: { w: ChartWidget }) {
       chart={w.chart}
       footer={
         <Link href={w.link} className={styles.more}>
-          Open the details →
+          Open the details
+          <Icon name="chevronRight" size={12} />
         </Link>
       }
     />
@@ -43,6 +76,7 @@ function List({ w }: { w: ListWidget }) {
         {w.link ? (
           <Link href={w.link} className={styles.more}>
             View all
+            <Icon name="chevronRight" size={12} />
           </Link>
         ) : null}
       </div>

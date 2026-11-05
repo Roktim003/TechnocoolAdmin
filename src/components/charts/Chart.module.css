@@ -1,160 +1,539 @@
+/* Gr8r Studio charts: bordered panel, quiet chrome, thin rounded marks, calm motion. */
 .chart {
   position: relative;
+  display: flex;
+  flex-direction: column;
   margin: 0;
-  padding: var(--space-5);
-  background: var(--color-surface);
+  padding: 14px 16px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
   min-width: 0;
 }
 
 .head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
+  gap: var(--s-2);
+  margin-bottom: var(--s-3);
+}
+
+.headText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .title {
-  font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
+  font-size: var(--fs);
+  font-weight: 600;
+}
+
+.summary {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--h-sm);
+  padding: 0 8px;
+  margin: -3px -4px 0 0;
   border: 0;
+  border-radius: var(--r-sm);
   background: none;
-  padding: 0;
-  color: var(--color-primary);
-  font-size: var(--text-xs);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
   cursor: pointer;
-  white-space: nowrap;
+  transition:
+    background var(--dur),
+    color var(--dur);
 }
 
-.toggle:hover {
-  text-decoration: underline;
+.toggle:hover,
+.toggle[aria-pressed="true"] {
+  background: var(--surface-2);
+  color: var(--text);
 }
 
-.svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  overflow: visible;
-}
-
-.grid {
-  stroke: var(--chart-grid);
-  stroke-width: 1;
-}
-
-.axis {
-  stroke: var(--chart-axis);
-  stroke-width: 1;
-}
-
-.axisText {
-  fill: var(--chart-axis);
-  font-size: 11px;
-  font-family: var(--font-sans);
-}
-
-.labelText {
-  fill: var(--color-text-primary);
-  font-size: 11px;
-  font-family: var(--font-sans);
-}
-
-.centerValue {
-  fill: var(--color-text-primary);
-  font-size: 20px;
-  font-weight: var(--weight-semibold);
-  font-family: var(--font-sans);
-}
-
+/* Legend (2+ series): key mirrors the mark, name in secondary ink, period total in primary. */
 .legend {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-5);
-  margin: 0 0 var(--space-3);
+  gap: var(--s-1) var(--s-5);
+  margin: -2px 0 var(--s-3);
   padding: 0;
   list-style: none;
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
+  font-size: var(--fs-sm);
 }
 
 .legend li {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
 }
 
-.swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
+.legendName {
+  color: var(--text-2);
+}
+
+.legendValue {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.keyRect {
   flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
 }
 
+.keyLine {
+  flex: none;
+  width: 12px;
+  height: 2px;
+  border-radius: 2px;
+}
+
+.body {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.svg {
+  display: block;
+  overflow: visible;
+  touch-action: pan-y;
+}
+
+/* ── Chrome ── */
+.grid {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.axis {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.axisText,
+.axisTextOn {
+  fill: var(--text-3);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+.axisTextOn {
+  fill: var(--text);
+  font-weight: 500;
+}
+
+.capText {
+  fill: var(--text-2);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  animation: fade 0.5s 0.45s var(--ease) both;
+}
+
+.crosshair {
+  stroke: var(--text-4);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.bandHover {
+  fill: var(--surface-2);
+}
+
+/* ── Marks ── */
+.bar {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: grow 0.6s var(--ease) both;
+}
+
+.dim {
+  opacity: 0.35;
+}
+
+.bar,
+.seg,
+.dim {
+  transition: opacity var(--dur);
+}
+
+.line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: draw 0.9s var(--ease) both;
+}
+
+.area {
+  animation: fade 0.6s 0.25s var(--ease) both;
+}
+
+.dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+@keyframes grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes growX {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ── Tooltip: value leads, line/rect keys ── */
 .tooltip {
   position: absolute;
   z-index: 5;
   pointer-events: none;
-  min-width: 160px;
+  min-width: 168px;
   max-width: 260px;
-  padding: var(--space-3) var(--space-4);
-  background: var(--shell-header-bg);
-  color: var(--shell-header-text);
-  font-size: var(--text-xs);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--fs-xs);
+  animation: fade 0.12s var(--ease);
 }
 
 .tipTitle {
-  font-weight: var(--weight-semibold);
-  margin-bottom: var(--space-2);
+  margin-bottom: 6px;
+  color: var(--text-3);
+  font-weight: 500;
 }
 
 .tipRow {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: 8px;
+  line-height: 1.9;
+}
+
+.tipName {
+  color: var(--text-2);
 }
 
 .tipRow strong {
   margin-left: auto;
-  font-weight: var(--weight-semibold);
+  padding-left: 12px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
+.tipKeyLine {
+  flex: none;
+  width: 10px;
+  height: 2px;
+  border-radius: 2px;
+}
+
+.tipKeyRect {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+/* ── Figure (one value) ── */
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+  padding: var(--s-2) 0 var(--s-1);
+}
+
+.figureLabel {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.figureValue {
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+
+.meter {
+  display: block;
+  height: 8px;
+  margin-top: var(--s-2);
+  border-radius: 8px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.meterFill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 8px;
+  transform-origin: left;
+  animation: growX 0.7s var(--ease) both;
+}
+
+.figureNote {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ── Ranked list (hbar) ── */
+.rank {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -6px;
+  padding: 0;
+  list-style: none;
+}
+
+.rankRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px;
+  border-radius: var(--r-sm);
+  transition: background var(--dur);
+}
+
+.rankRow:hover {
+  background: var(--surface-2);
+}
+
+.rankNo {
+  flex: none;
+  width: 16px;
+  padding-top: 1px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rankMain {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rankHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+}
+
+.rankLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rankValue {
+  flex: none;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.track {
+  display: block;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.trackFill {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  transform-origin: left;
+  animation: growX 0.6s var(--ease) both;
+}
+
+/* ── Donut ── */
+.donutWrap {
+  display: flex;
+  align-items: center;
+  gap: var(--s-6);
+  flex-wrap: wrap;
+}
+
+.donut {
+  flex: none;
+  display: block;
+  animation: fade 0.5s var(--ease) both;
+}
+
+.seg {
+  stroke: var(--surface);
+  stroke-width: 2;
+  cursor: default;
+}
+
+.centerValue {
+  fill: var(--text);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-family: var(--font-sans);
+}
+
+.centerLabel {
+  fill: var(--text-3);
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+}
+
+.donutLegend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 180px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+
+.donutLegend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--r-sm);
+  transition:
+    opacity var(--dur),
+    background var(--dur);
+}
+
+.donutLegend li:hover {
+  background: var(--surface-2);
+}
+
+.donutLegend .legendName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legendPct {
+  width: 40px;
+  text-align: right;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Empty / table ── */
 .empty {
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 180px;
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
-  background: var(--color-background);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r);
+  background: var(--sunken);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
 }
 
 .tableWrap {
   max-height: 280px;
   overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
 }
 
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--text-sm);
+  font-size: var(--fs-sm);
 }
 
 .table th {
   position: sticky;
   top: 0;
-  background: var(--color-selected);
+  background: var(--sunken);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
   text-align: left;
-  font-weight: var(--weight-semibold);
-  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  padding: 6px 10px;
 }
 
 .table td {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--color-border);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.table tr:last-child td {
+  border-bottom: 0;
 }
 
 .num {
@@ -169,5 +548,70 @@
   }
   .chart {
     break-inside: avoid;
+  }
+  .bar,
+  .line,
+  .area,
+  .trackFill,
+  .meterFill,
+  .capText {
+    animation: none;
+  }
+}
+
+/* ── High-tech layer: reflections, live pulse, glowing hover band ── */
+.reflection {
+  animation: fade 0.6s 0.35s var(--ease) both;
+}
+
+.endDot {
+  animation: fade 0.4s 0.75s var(--ease) both;
+}
+
+/* "Live" ring that breathes out from the latest data point. */
+.pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: pulse 2.4s 1s var(--ease) infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  70%,
+  100% {
+    transform: scale(3.2);
+    opacity: 0;
+  }
+}
+
+.bandHover {
+  fill: color-mix(in srgb, var(--accent) 5%, var(--surface-2));
+}
+
+.crosshair {
+  stroke: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+}
+
+.figureValue {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    display: none;
+  }
+}
+
+@media print {
+  .pulse {
+    display: none;
+  }
+  .reflection,
+  .endDot {
+    animation: none;
   }
 }

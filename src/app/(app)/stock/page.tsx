@@ -33,7 +33,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
           ) : null
         }
       />
-      <StockWorkspace caps={caps} warehouses={warehouses} initialTab={initialTab} defaultVat={settings.defaultSalesVatPercent} initialPoId={po} prefill={prefillType ? { type: prefillType, projectId: project, warehouseId: warehouse } : undefined} />
+      <StockWorkspace caps={caps} warehouses={warehouses} initialTab={initialTab} defaultVat={settings.defaultSalesVatPercent} requiredDocs={settings.importDocsRequiredToPost} initialPoId={po} prefill={prefillType ? { type: prefillType, projectId: project, warehouseId: warehouse } : undefined} />
     </>
   );
 }

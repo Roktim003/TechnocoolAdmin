@@ -15,6 +15,11 @@
  *    with issued and returned material, labour / transport costs (see seed-projects.ts).
  *  - Purchasing settings (default PO terms). With sample data and no purchase orders yet: a few
  *    sample products and purchase orders in different states (see seed-purchasing.ts).
+ *  - Imports: with sample data, once, a posted GRN (Imported) with all five import documents
+ *    and sample files (see seed-imports.ts).
+ *  - Overheads: with sample data and an empty register, three months of warehouse / company
+ *    overhead costs and overhead lines on 2 sample projects (see seed-overheads.ts). The roles'
+ *    "overheads" permission comes from SEED_ROLES (Admin, Accounts FULL; others NONE).
  *  - Reports: with sample data and no schedules yet, three scheduled emails to the Admin
  *    (see seed-reports.ts).
  */
@@ -33,6 +38,8 @@ import { formatSupplierCode } from "@/modules/purchasing/domain/types";
 import { seedSampleProjects } from "./seed-projects";
 import { seedSampleSchedules } from "./seed-reports";
 import { seedSamplePurchases } from "./seed-purchasing";
+import { seedSampleImport } from "./seed-imports";
+import { seedSampleOverheads } from "./seed-overheads";
 
 const DEFAULT_PO_TERMS = [
   "1. Prices are fixed for this order.",
@@ -115,6 +122,10 @@ export async function seed(
     sampleProjects?: boolean;
     /** Three sample scheduled report emails to the Admin (demo installs only; off in tests). */
     sampleSchedules?: boolean;
+    /** A posted sample GRN (Imported) with all five import documents and files (demo installs only; off in tests). */
+    sampleImports?: boolean;
+    /** Three months of sample warehouse / company overheads and overhead lines on 2 projects (demo installs only; off in tests). */
+    sampleOverheads?: boolean;
     log?: (msg: string) => void;
   },
 ) {
@@ -183,8 +194,10 @@ export async function seed(
     update: {},
   });
   if (opts.samplePurchases) await seedSamplePurchases(prisma, log);
+  if (opts.sampleImports) await seedSampleImport(prisma, log);
   if (opts.sampleProjects) await seedSampleProjects(prisma, log);
   if (opts.sampleSchedules) await seedSampleSchedules(prisma, log);
+  if (opts.sampleOverheads) await seedSampleOverheads(prisma, log);
 }
 
 async function main() {
@@ -201,6 +214,8 @@ async function main() {
       samplePurchases: process.env.SEED_SAMPLE_DATA !== "false",
       sampleProjects: process.env.SEED_SAMPLE_DATA !== "false",
       sampleSchedules: process.env.SEED_SAMPLE_DATA !== "false",
+      sampleImports: process.env.SEED_SAMPLE_DATA !== "false",
+      sampleOverheads: process.env.SEED_SAMPLE_DATA !== "false",
       log: (m) => console.log(`[seed] ${m}`),
     });
     console.log("[seed] done");

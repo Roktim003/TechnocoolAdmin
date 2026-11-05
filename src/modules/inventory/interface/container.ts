@@ -5,6 +5,8 @@ import { AlertService } from "../application/alerts.service";
 import { AttachmentService } from "../application/attachment.service";
 import { CountService } from "../application/count.service";
 import { EntryService } from "../application/entry.service";
+import { ImportDocsService } from "../application/import-docs.service";
+import { makeThumbnail } from "@/shared/storage/images";
 import { MastersService } from "../application/masters.service";
 import { OpeningImportService, type OpeningImportQueue } from "../application/opening.service";
 import { StockPostingService } from "../application/posting.service";
@@ -34,7 +36,8 @@ function build() {
     entries,
     masters: new MastersService({ uow }),
     stock: new StockQueryService({ uow }),
-    attachments: new AttachmentService({ uow, files, entries }),
+    attachments: new AttachmentService({ uow, files, entries, thumbnail: makeThumbnail }),
+    importDocs: new ImportDocsService({ uow }),
     counts: new CountService({ uow, posting, events }),
     openings: new OpeningImportService({ uow, posting, files, sheets: openingSheets, queue: openingQueue, events }),
     alerts: new AlertService({

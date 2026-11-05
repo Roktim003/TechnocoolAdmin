@@ -1,92 +1,184 @@
 /*
- * StockBook design tokens (Carbon-style). Every colour, size and font used by the UI
- * comes from here — components reference these variables only.
+ * StockBook design tokens — Gr8r Studio design system.
+ * Warm-gray neutrals, one indigo accent, hairline borders, small dense type.
+ * Every colour, size and font used by the UI comes from here — components reference these variables only.
+ *
+ * Two layers:
+ *   1. Gr8r tokens (--bg, --surface, --text-2, --accent, --r-sm, --h-md …), as published by the design system.
+ *   2. StockBook aliases (--color-*, --space-*, --text-*) that existing components use, mapped onto layer 1.
  */
 :root {
+  /* ── 1. Gr8r Studio tokens ─────────────────────────────────────────────── */
+
+  /* Surfaces */
+  --bg: #fbfaf8;
+  --bg-side: #f4f3f0;
+  --surface: #ffffff;
+  --surface-2: #f6f5f2;
+  --surface-3: #eeede9;
+  --sunken: #f7f6f3;
+  --overlay: rgba(24, 22, 19, 0.28);
+
+  /* Lines */
+  --border: #e9e7e2;
+  --border-strong: #dad7d0;
+  --divider: #f0eeea;
+
+  /* Text */
+  --text: #1d1c1a;
+  --text-2: #57544e;
+  --text-3: #6b6760;
+  --text-4: #8c8880; /* decorative icons only */
+  --text-inv: #ffffff;
+
+  /* Accent (indigo) */
+  --accent: #4b5bd6;
+  --on-accent: #ffffff;
+  --accent-soft: rgba(75, 91, 214, 0.1);
+  --accent-line: rgba(75, 91, 214, 0.38);
+
+  /* Semantic */
+  --green: #25754b;
+  --amber: #8f5e0e;
+  --red: #b23c30;
+  --blue: #3570c4;
+  --violet: #7652c2;
+  --teal: #1e8580;
+  --rose: #bc4270;
+  --orange: #c0612b;
+  --gray: #8a867e;
+  --green-soft: rgba(37, 117, 75, 0.11);
+  --amber-soft: rgba(143, 94, 14, 0.12);
+  --red-soft: rgba(178, 60, 48, 0.1);
+  --blue-soft: rgba(53, 112, 196, 0.1);
+  --violet-soft: rgba(118, 82, 194, 0.11);
+  --gray-soft: rgba(138, 134, 126, 0.12);
+
+  /* Type */
+  --font-sans: var(--font-geist), "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-geist-mono), "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 12.5px;
+  --fs: 13.5px;
+  --fs-md: 14.5px;
+  --fs-lg: 16px;
+  --fs-xl: 19px;
+  --fs-2xl: 23px;
+
+  /* Spacing (4pt) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* Radii */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r: 8px;
+  --r-lg: 10px;
+  --r-modal: 12px;
+  --r-badge: 5px;
+  --r-full: 999px;
+
+  /* Depth */
+  --shadow-sm: 0 1px 2px rgba(28, 25, 20, 0.05);
+  --shadow-card: 0 1px 2px rgba(28, 25, 20, 0.04), 0 0 0 1px #e9e7e2;
+  --shadow-pop: 0 12px 32px -8px rgba(28, 25, 20, 0.16), 0 2px 6px -2px rgba(28, 25, 20, 0.06), 0 0 0 1px #e9e7e2;
+
+  /* Sizes */
+  --h-xs: 22px;
+  --h-sm: 26px;
+  --h-md: 30px;
+  --h-lg: 36px;
+  --side-w: 252px;
+  --side-row: 30px;
+  --row-h: 40px;
+  --topbar-h: 46px;
+  --gutter: 24px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur: 140ms;
+
+  /* ── 2. StockBook aliases (used across existing components) ─────────────── */
+
   /* Typography */
-  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-md: 14px;
-  --text-base: 16px;
-  --text-page-title: 28px;
+  --text-xs: var(--fs-xs);
+  --text-sm: var(--fs-sm);
+  --text-md: var(--fs);
+  --text-base: var(--fs-lg);
+  --text-page-title: var(--fs-2xl);
   --weight-regular: 400;
+  --weight-medium: 500;
   --weight-semibold: 600;
-  --line-height: 1.43;
+  --line-height: 1.45;
 
   /* Surfaces & text */
-  --color-background: #f4f4f4;
-  --color-surface: #ffffff;
-  --color-field: #f4f4f4;
-  --color-field-hover: #e8e8e8;
-  --color-text-primary: #161616;
-  --color-text-secondary: #525252;
-  --color-text-muted: #393939;
-  --color-text-placeholder: #a8a8a8;
-  --color-text-on-color: #ffffff;
-  --color-text-disabled: #8d8d8d;
-  --color-border: #e0e0e0;
-  --color-border-strong: #8d8d8d;
-  --color-layer-hover: #e8e8e8;
-  --color-selected: #e0e0e0;
-  --color-overlay: rgba(22, 22, 22, 0.5);
+  --color-background: var(--bg);
+  --color-surface: var(--surface);
+  --color-field: var(--surface);
+  --color-field-hover: var(--surface-2);
+  --color-text-primary: var(--text);
+  --color-text-secondary: var(--text-2);
+  --color-text-muted: var(--text-2);
+  --color-text-placeholder: var(--text-3);
+  --color-text-on-color: var(--on-accent);
+  --color-text-disabled: var(--text-4);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-layer-hover: var(--surface-2);
+  --color-selected: var(--surface-3);
+  --color-overlay: var(--overlay);
 
   /* Interactive */
-  --color-primary: #0f62fe;
-  --color-primary-hover: #0353e9;
-  --color-primary-active: #002d9c;
-  --color-focus: #0f62fe;
-  --focus-ring: 2px solid var(--color-focus);
-  --color-disabled-bg: #c6c6c6;
+  --color-primary: var(--accent);
+  --color-primary-hover: color-mix(in srgb, var(--accent) 88%, var(--text));
+  --color-primary-active: color-mix(in srgb, var(--accent) 78%, var(--text));
+  --color-focus: var(--accent);
+  --focus-ring: 2px solid var(--accent);
+  --color-disabled-bg: var(--surface-3);
 
   /* Status */
-  --color-success: #24a148;
-  --color-success-tag-bg: #a7f0ba;
-  --color-success-tag-text: #0e6027;
-  --color-success-notification-bg: #defbe6;
-  --color-error: #da1e28;
-  --color-error-hover: #b81921;
-  --color-error-tag-bg: #ffd7d9;
-  --color-error-tag-text: #a2191f;
-  --color-error-notification-bg: #fff1f1;
-  --color-warning: #f1c21b;
-  --color-warning-tag-bg: #fcf4d6;
-  --color-warning-tag-text: #684e00;
-  --color-warning-notification-bg: #fcf4d6;
-  --color-info: #0043ce;
-  --color-info-bg: #edf5ff;
-  --color-purple-tag-bg: #e8daff;
-  --color-purple-tag-text: #6929c4;
-  --color-gray-tag-bg: #e0e0e0;
-  --color-gray-tag-text: #161616;
+  --color-success: var(--green);
+  --color-success-tag-bg: var(--green-soft);
+  --color-success-tag-text: var(--green);
+  --color-success-notification-bg: var(--green-soft);
+  --color-error: var(--red);
+  --color-error-hover: color-mix(in srgb, var(--red) 88%, #000);
+  --color-error-tag-bg: var(--red-soft);
+  --color-error-tag-text: var(--red);
+  --color-error-notification-bg: var(--red-soft);
+  --color-warning: #c88a14;
+  --color-warning-tag-bg: var(--amber-soft);
+  --color-warning-tag-text: var(--amber);
+  --color-warning-notification-bg: var(--amber-soft);
+  --color-info: var(--blue);
+  --color-info-bg: var(--blue-soft);
+  --color-purple-tag-bg: var(--violet-soft);
+  --color-purple-tag-text: var(--violet);
+  --color-gray-tag-bg: var(--surface-2);
+  --color-gray-tag-text: var(--text-2);
 
   /* UI shell */
-  --shell-header-height: 48px;
-  --shell-header-bg: #161616;
-  --shell-header-text: #f4f4f4;
-  --shell-header-text-secondary: #c6c6c6;
-  --shell-header-hover: #353535;
-  --shell-header-border: #393939;
-  --shell-search-bg: #262626;
-  --shell-nav-width: 256px;
-  --shell-nav-bg: #ffffff;
-  --shell-nav-item-height: 40px;
-  --shell-nav-active-bg: #e0e0e0;
-  --shell-nav-active-border: 3px solid #0f62fe;
+  --shell-header-height: var(--topbar-h);
+  --shell-nav-width: var(--side-w);
 
   /* Controls */
-  --button-height: 48px;
-  --button-height-sm: 32px;
-  --field-height: 40px;
-  --touch-target: 44px;
-  --radius: 0;
-  --radius-pill: 999px;
-  --tab-border: 2px solid #e0e0e0;
-  --tab-border-selected: 2px solid #0f62fe;
-  --switcher-border: 1px solid #161616;
+  --button-height: var(--h-md);
+  --button-height-sm: var(--h-sm);
+  --field-height: var(--h-md);
+  --touch-target: 40px;
+  --radius: var(--r-sm);
+  --radius-pill: var(--r-full);
 
-  /* Spacing (Carbon 2x grid) */
+  /* Spacing (legacy scale → nearest 4pt step) */
   --space-1: 2px;
   --space-2: 4px;
   --space-3: 8px;
@@ -100,16 +192,16 @@
   /* Breakpoints (reference only — CSS can't use vars in media queries): sm 672px, md 1056px */
 }
 
-/* Charts: Carbon data-visualisation palette (categorical order) and chart chrome. */
+/* Charts: Gr8r project colours (categorical order) and chart chrome. */
 :root {
-  --chart-1: #6929c4;
-  --chart-2: #1192e8;
-  --chart-3: #005d5d;
-  --chart-4: #9f1853;
-  --chart-5: #fa4d56;
-  --chart-6: #570408;
-  --chart-7: #198038;
-  --chart-8: #002d9c;
-  --chart-axis: #525252;
-  --chart-grid: #e0e0e0;
+  --chart-1: #5a67d8;
+  --chart-2: #23918a;
+  --chart-3: #c48a1e;
+  --chart-4: #c54b78;
+  --chart-5: #3b82c4;
+  --chart-6: #8662c9;
+  --chart-7: #3d8e5f;
+  --chart-8: #6b7280;
+  --chart-axis: var(--text-3);
+  --chart-grid: var(--divider);
 }

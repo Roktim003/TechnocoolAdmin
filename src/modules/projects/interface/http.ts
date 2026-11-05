@@ -1,7 +1,8 @@
-import { NotFoundError } from "@/shared/errors/app-error";
+import { ForbiddenError, NotFoundError } from "@/shared/errors/app-error";
 import { authedRoute, type AuthedContext, type BaseContext } from "@/shared/http/route";
 import { pageMeta } from "@/shared/pagination/list-query";
 import { requireAnyPermission } from "@/shared/rbac/guards";
+import { canSeeOverheads, hasLevel } from "@/shared/rbac/levels";
 import type { Principal } from "@/shared/auth/principal";
 import { UuidSchema } from "@/shared/validation/zod";
 import {
@@ -12,14 +13,17 @@ import {
   EntriesQuerySchema,
   ProjectListQuerySchema,
   ProjectOptionsQuerySchema,
+  UpdateCostSchema,
   UpdateProjectSchema,
   VoidCostSchema,
 } from "../application/dto";
+import { canEditOverheads } from "../application/cost.service";
+import { isOverhead } from "../domain/types";
 import type { AttachmentTarget } from "../application/attachment.service";
 import type { ProjectsActor } from "../application/ports";
 import { ProjectErrors } from "../domain/errors";
 import { projects } from "./container";
-import { costSubtotals, toActivityDto, toCostDto, toEntryRowDto, toHistoryDto, toMaterialDto, toProjectAttachmentDto, toProjectDto, toProjectOptionDto } from "./mappers";
+import { costSubtotals, summaryFor, toActivityDto, toCostDto, toCostHistoryDto, toEntryRowDto, toHistoryDto, toMaterialDto, toProjectAttachmentDto, toProjectDto, toProjectOptionDto } from "./mappers";
 
 /* Thin HTTP adapters: parse + validate → call the service → map. */
 
@@ -44,9 +48,11 @@ export function projectsActor(p: Principal, ip: string | null = null, requestId:
     level: p.permissions.projects,
     inventoryLevel: p.permissions.inventory,
     purchasingLevel: p.permissions.purchasing,
+    overheadsLevel: p.permissions.overheads,
     warehouseIds: p.warehouseIds,
     canSeeCost: p.flags.seeCost,
     canSeeMargin: p.flags.seeMargin,
+    canSeeOverheads: canSeeOverheads(p),
     isAdmin: p.isAdmin,
   };
 }
@@ -60,6 +66,17 @@ function uuid(value: string | undefined, entity: string): string {
 const id = (ctx: BaseContext<IdParams>) => uuid(ctx.params.id, "Project");
 const costTarget = (ctx: BaseContext<CostParams>): AttachmentTarget => ({ kind: "cost", projectId: uuid(ctx.params.id, "Project"), costId: uuid(ctx.params.costId, "Cost") });
 const p = () => projects();
+
+/** Cost lines: the projects module checks who may add / edit / void per category, so the route only needs projects ≥ VIEW. */
+const COST_ACTION = { permission: ["projects", "VIEW"] as const, idempotent: "required" as const };
+
+/** Receipts of an overhead line: hidden without overhead access, changed only with overheads ≥ CREATE. */
+async function assertCostTarget(ctx: AuthedContext<unknown>, t: AttachmentTarget, write: boolean) {
+  if (t.kind !== "cost") return;
+  const a = actorOf(ctx);
+  const c = await p().costs.get(t.projectId, t.costId, a);
+  if (write && isOverhead(c.category) && !canEditOverheads(a)) throw ProjectErrors.overheadForbidden();
+}
 
 const detail = async (ctx: AuthedContext<unknown>, projectId: string) => {
   const a = actorOf(ctx);
@@ -116,7 +133,9 @@ export const projectHandlers = {
   activity: authedRoute<IdParams>(VIEW, async (ctx) => {
     const a = actorOf(ctx);
     const r = await p().projects.activity(id(ctx));
-    return { data: { statusHistory: r.history.map(toHistoryDto), audit: r.audit.map((x) => toActivityDto(x, a)) } };
+    // Overhead lines (and their amounts) are not shown to viewers without overhead access.
+    const audit = a.canSeeOverheads ? r.audit : r.audit.filter((x) => !x.action.startsWith("project.overhead_"));
+    return { data: { statusHistory: r.history.map(toHistoryDto), audit: audit.map((x) => toActivityDto(x, a)) } };
   }),
   siteEngineers: authedRoute(CREATE, async () => ({ data: await p().projects.siteEngineers() })),
   options: authedRoute({}, async (ctx) => {
@@ -132,7 +151,11 @@ export const projectHandlers = {
     const project = await p().projects.get(projectId);
     const [rows, summary] = await Promise.all([p().costing.material(projectId), p().costing.summary(project)]);
     return {
-      data: { lines: rows.map((m) => toMaterialDto(m, a)), totals: a.canSeeCost ? { issuedCost: summary.issuedCost, returnedCost: summary.returnedCost, netMaterialCost: summary.netMaterialCost } : {} },
+      data: {
+        lines: rows.map((m) => toMaterialDto(m, a)),
+        totals: a.canSeeCost ? { issuedCost: summary.issuedCost, returnedCost: summary.returnedCost, netMaterialCost: summary.netMaterialCost } : {},
+        summary: summaryFor(summary, a),
+      },
     };
   }),
   movements: authedRoute<IdParams>(VIEW, async (ctx) => {
@@ -148,18 +171,39 @@ export const projectHandlers = {
   costs: authedRoute<IdParams>(VIEW, async (ctx) => {
     const a = actorOf(ctx);
     const query = ctx.query(CostListQuerySchema);
-    const rows = await p().costs.list(id(ctx), query);
-    return { data: { costs: rows.map((c) => toCostDto(c, a)), subtotals: costSubtotals(rows, a) } };
+    const projectId = id(ctx);
+    const rows = await p().costs.list(projectId, query, a);
+    const project = await p().projects.get(projectId);
+    return { data: { costs: rows.map((c) => toCostDto(c, a, project)), subtotals: costSubtotals(rows, a) } };
   }),
-  addCost: authedRoute<IdParams>(ACTION("CREATE"), async (ctx) => {
-    const c = await p().costs.add(actorOf(ctx), id(ctx), await ctx.body(AddCostSchema));
-    return { status: 201, data: toCostDto(c, actorOf(ctx)) };
+  /** Labour / transport / other: projects ≥ CREATE (unchanged). Overheads: overheads ≥ CREATE + seeCost. */
+  addCost: authedRoute<IdParams>(COST_ACTION, async (ctx) => {
+    const a = actorOf(ctx);
+    const projectId = id(ctx);
+    const { warnings, ...c } = await p().costs.add(a, projectId, await ctx.body(AddCostSchema));
+    return { status: 201, data: { ...toCostDto(c, a, await p().projects.get(projectId)), warnings } };
   }),
-  voidCost: authedRoute<CostParams>(ACTION("FULL"), async (ctx) => {
+  /** Overhead lines only, at any status (a reason on CLOSED projects). */
+  updateCost: authedRoute<CostParams>({ permission: ["projects", "VIEW"] }, async (ctx) => {
+    const t = costTarget(ctx);
+    if (t.kind !== "cost") throw new NotFoundError("Cost");
+    const a = actorOf(ctx);
+    const { warnings, ...c } = await p().costs.update(a, t.projectId, t.costId, await ctx.body(UpdateCostSchema));
+    return { data: { ...toCostDto(c, a, await p().projects.get(t.projectId)), warnings } };
+  }),
+  voidCost: authedRoute<CostParams>(COST_ACTION, async (ctx) => {
     const t = costTarget(ctx);
     if (t.kind !== "cost") throw new NotFoundError("Cost");
     const input = await ctx.body(VoidCostSchema);
-    return { data: toCostDto(await p().costs.void(actorOf(ctx), t.projectId, t.costId, input.reason), actorOf(ctx)) };
+    const a = actorOf(ctx);
+    return { data: toCostDto(await p().costs.void(a, t.projectId, t.costId, input.reason), a, await p().projects.get(t.projectId)) };
+  }),
+  costHistory: authedRoute<CostParams>(VIEW, async (ctx) => {
+    const t = costTarget(ctx);
+    if (t.kind !== "cost") throw new NotFoundError("Cost");
+    const a = actorOf(ctx);
+    const r = await p().costs.history(a, t.projectId, t.costId);
+    return { data: { cost: toCostDto(r.cost, a), history: toCostHistoryDto(r.rows, a) } };
   }),
 
   /* documents */
@@ -168,29 +212,49 @@ export const projectHandlers = {
     if (!a.canSeeCost) throw ProjectErrors.costHidden();
     const projectId = id(ctx);
     await p().projects.get(projectId);
-    const r = await p().documents.enqueue({ projectId, userId: a.actorId, userName: a.name, showMargin: a.canSeeMargin });
+    const r = await p().documents.enqueue({ projectId, userId: a.actorId, userName: a.name, showMargin: a.canSeeMargin, showOverheads: a.canSeeOverheads });
     return { status: 202, data: { jobId: r.jobId, kind: "PROJECT_COST_STATEMENT", status: "queued" }, headers: { Location: `/api/v1/documents/${r.jobId}` } };
   }),
 };
 
 /* ─────────────── attachments (project files; cost receipts) ─────────────── */
 
+/**
+ * Uploading / removing files: projects ≥ CREATE as before; receipts of an overhead line need
+ * overheads ≥ CREATE instead (Accounts has projects VIEW).
+ */
+async function requireCreateOrOverhead(ctx: AuthedContext<unknown>, t: AttachmentTarget) {
+  const a = actorOf(ctx);
+  if (t.kind === "cost") {
+    const c = await p().costs.get(t.projectId, t.costId, a);
+    if (isOverhead(c.category)) {
+      if (!canEditOverheads(a)) throw ProjectErrors.overheadForbidden();
+      return;
+    }
+  }
+  if (!hasLevel(a.level, "CREATE")) throw new ForbiddenError("This needs projects ≥ CREATE.");
+}
+
 function attachmentHandlers<P extends IdParams>(target: (ctx: BaseContext<P>) => AttachmentTarget) {
   return {
     list: authedRoute<P>(VIEW, async (ctx) => {
       const t = target(ctx);
+      await assertCostTarget(ctx, t, false);
       return { data: (await p().attachments.list(t)).map((x) => toProjectAttachmentDto(x, t.projectId)) };
     }),
-    add: authedRoute<P>({ ...CREATE, idempotent: false }, async (ctx) => {
+    add: authedRoute<P>({ ...VIEW, idempotent: false }, async (ctx) => {
       const t = target(ctx);
+      await requireCreateOrOverhead(ctx, t);
       const f = await files(ctx);
       return { status: 201, data: (await p().attachments.upload(actorOf(ctx), t, f.list, f.label)).map((x) => toProjectAttachmentDto(x, t.projectId)) };
     }),
     file: authedRoute<P & { attachmentId: string }>(VIEW, async (ctx) => {
+      await assertCostTarget(ctx, target(ctx), false);
       const f = await p().attachments.file(target(ctx), uuid(ctx.params.attachmentId, "Attachment"));
       return { file: { body: f.body, contentType: f.mimeType, filename: f.fileName, inline: true, cacheSeconds: 300 } };
     }),
-    remove: authedRoute<P & { attachmentId: string }>(CREATE, async (ctx) => {
+    remove: authedRoute<P & { attachmentId: string }>(VIEW, async (ctx) => {
+      await requireCreateOrOverhead(ctx, target(ctx));
       await p().attachments.remove(actorOf(ctx), target(ctx), uuid(ctx.params.attachmentId, "Attachment"));
       return { status: 204 };
     }),

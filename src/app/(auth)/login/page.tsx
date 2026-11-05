@@ -12,19 +12,22 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 
   return (
     <main className={styles.page}>
-      <header className={styles.brandBar}>
-        <span className={styles.brand}>
-          <strong>StockBook</strong>
-        </span>
-      </header>
-      <section className={styles.panel} aria-labelledby="login-title">
-        <h1 id="login-title" className={styles.title}>
-          Log in
-        </h1>
-        <p className={styles.subtitle}>Inventory for LG · Daikin · Dunham-Bush projects</p>
-        <LoginForm next={next ?? ""} expired={expired === "1"} />
+      <div className={styles.wrap}>
+        <div className={styles.brand}>
+          <span className={styles.logo} aria-hidden="true">
+            SB
+          </span>
+          <span className={styles.brandName}>StockBook</span>
+        </div>
+        <section className={styles.panel} aria-labelledby="login-title">
+          <h1 id="login-title" className={styles.title}>
+            Log in to StockBook
+          </h1>
+          <p className={styles.subtitle}>Inventory for LG · Daikin · Dunham-Bush projects</p>
+          <LoginForm next={next ?? ""} expired={expired === "1"} />
+        </section>
         <p className={styles.footnote}>Forgot your password? Ask an Admin to set a new one.</p>
-      </section>
+      </div>
     </main>
   );
 }

@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Notification } from "@/components/ui/Notification";
+import { SkeletonLines } from "@/components/ui/Skeleton";
 import { Tabs } from "@/components/ui/Tabs";
 import { api, errorMessage } from "@/lib/api-client";
 import { REPORT_GROUPS } from "@/modules/reporting/domain/types";
@@ -64,7 +65,7 @@ export function ReportsWorkspace({ caps }: { caps: ReportsCaps }) {
         <Tabs<Tab>
           label="Reports"
           items={[
-            { key: "reports", label: `Reports (${catalog?.length ?? 14})` },
+            { key: "reports", label: catalog ? `Reports (${catalog.length})` : "Reports" },
             { key: "schedules", label: `Scheduled emails (${scheduleCount})` },
           ]}
           selected={tab}
@@ -99,7 +100,7 @@ export function ReportsWorkspace({ caps }: { caps: ReportsCaps }) {
                 </div>
               );
             })}
-            {!catalog && !error ? <p className={styles.muted}>Loading…</p> : null}
+            {!catalog && !error ? <SkeletonLines lines={8} label="Loading reports" /> : null}
           </nav>
           <div className={styles.main}>
             {report ? (

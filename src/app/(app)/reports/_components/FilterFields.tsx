@@ -3,13 +3,14 @@
 import { useEffect, useId, useState } from "react";
 import { Checkbox, SelectField, TextField } from "@/components/ui/Field";
 import { api } from "@/lib/api-client";
-import { DATE_TOKENS, isDateToken } from "@/modules/reporting/domain/schedule";
+import { DATE_TOKENS, isDateToken, isMonthToken, MONTH_TOKENS } from "@/modules/reporting/domain/schedule";
 import type { Lookups, ParamDef } from "./types";
 import styles from "./reports.module.css";
 
 /**
  * The filter fields of one report. Dates offer relative periods ("Start of this month", "Today",
- * …) or a fixed date: schedules keep the relative ones, so each email covers a fresh period.
+ * …) or a fixed date, months relative months ("This month", "5 months ago", …) or a fixed month:
+ * schedules keep the relative ones, so each email covers a fresh period.
  */
 export function FilterFields({ params, values, onChange, lookups }: { params: ParamDef[]; values: Record<string, string>; onChange: (key: string, value: string) => void; lookups: Lookups | null }) {
   return (
@@ -30,6 +31,9 @@ function Param({ p, value, onChange, lookups }: { p: ParamDef; value: string; on
     case "dateTo":
     case "date":
       return <DateParam label={p.label} value={value} onChange={onChange} allowEmpty={p.default === undefined} />;
+    case "monthFrom":
+    case "monthTo":
+      return <MonthParam label={p.label} value={value} onChange={onChange} />;
     case "warehouse":
       return (
         <SelectField label={p.label} value={value} onChange={(e) => onChange(e.target.value)}>
@@ -132,6 +136,35 @@ function DateParam({ label, value, onChange, allowEmpty }: { label: string; valu
         <option value="custom">A specific date…</option>
       </SelectField>
       {showDate ? <TextField label={<span className="visually-hidden">{label} date</span>} type="date" value={custom ? value : ""} onChange={(e) => onChange(e.target.value)} /> : null}
+    </div>
+  );
+}
+
+/** A month: a relative month ("This month", "5 months ago", …) or a specific month (YYYY-MM). */
+function MonthParam({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const custom = value !== "" && !isMonthToken(value);
+  const [showMonth, setShowMonth] = useState(custom);
+  useEffect(() => setShowMonth(value !== "" && !isMonthToken(value)), [value]);
+  return (
+    <div className={styles.dateParam}>
+      <SelectField
+        label={label}
+        value={showMonth ? "custom" : value}
+        onChange={(e) => {
+          if (e.target.value === "custom") {
+            setShowMonth(true);
+            onChange(new Date(Date.now() + 6 * 3600_000).toISOString().slice(0, 7));
+          } else onChange(e.target.value);
+        }}
+      >
+        {Object.entries(MONTH_TOKENS).map(([k, l]) => (
+          <option key={k} value={k}>
+            {l}
+          </option>
+        ))}
+        <option value="custom">A specific month…</option>
+      </SelectField>
+      {showMonth ? <TextField label={<span className="visually-hidden">{label} month</span>} type="month" value={custom ? value.slice(0, 7) : ""} onChange={(e) => onChange(e.target.value)} /> : null}
     </div>
   );
 }

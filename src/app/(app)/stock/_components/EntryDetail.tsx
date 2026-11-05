@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
+import { Select } from "@/components/ui/Select";
 import { Checkbox, TextAreaField, TextField } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
@@ -12,6 +13,20 @@ import { api, ApiError, errorMessage, upload } from "@/lib/api-client";
 import { allowedKinds, DOCUMENT_TITLES } from "@/modules/inventory/infrastructure/document-template";
 import { formatDateTime, formatMoney } from "@/shared/time/format";
 import { CHARGE_TYPES, formatAmount, formatQty, newKey, STATUS_LABEL, STATUS_TAG, type EntryDto, type StockCaps } from "./types";
+import { ImportDocuments } from "./ImportDocuments";
+import {
+  DEFAULT_REQUIRED,
+  emptyAttachments,
+  localChecklist,
+  missingRequired,
+  missingTitle,
+  removeRule,
+  shipmentBody,
+  toShipmentForm,
+  type EntryDetailDto,
+  type ImportAttachments,
+  type ImportWarning,
+} from "./import-docs";
 import styles from "./stock.module.css";
 
 interface Attachment {
@@ -20,6 +35,8 @@ interface Attachment {
   mimeType: string;
   size: number;
   label: string | null;
+  /** Set on GRN (Imported) document files, which are shown in the Import documents section. */
+  docType?: string | null;
   uploadedBy: { name: string } | null;
   createdAt: string;
   url: string;
@@ -48,10 +65,17 @@ const REFERENCE_LABELS: Record<string, string> = {
 
 const bytes = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 
-export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial: EntryDto; saved: string | null }) {
+export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial: EntryDetailDto; saved: string | null }) {
   const router = useRouter();
-  const [e, setE] = useState(initial);
-  const [notice, setNotice] = useState<{ kind: "success" | "error" | "warning"; title?: string; message: string } | null>(saved && SAVED[saved] ? { kind: "success", message: SAVED[saved] } : null);
+  const [e, setE] = useState<EntryDetailDto>(initial);
+  const [notice, setNotice] = useState<{ kind: "success" | "error" | "warning"; title?: string; message: ReactNode } | null>(saved && SAVED[saved] ? { kind: "success", message: SAVED[saved] } : null);
+  // GRN (Imported) documents: kept apart from `e` because action responses don't carry them.
+  const [shipment, setShipment] = useState(() => toShipmentForm(initial.importShipment, initial.references.billOfEntryNo));
+  const [importFiles, setImportFiles] = useState<ImportAttachments>(() => initial.importAttachments ?? emptyAttachments());
+  const [importWarnings, setImportWarnings] = useState<ImportWarning[]>(initial.importWarnings ?? []);
+  const [docDraft, setDocDraft] = useState<ReturnType<typeof toShipmentForm> | null>(null);
+  const [docErrors, setDocErrors] = useState<Record<string, string>>({});
+  const [docSaving, setDocSaving] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [modal, setModal] = useState<"reject" | "reverse" | "cancel" | null>(null);
   const [reason, setReason] = useState("");
@@ -66,7 +90,7 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
 
   useEffect(() => {
     api<{ data: Attachment[] }>(`/stock-entries/${e.id}/attachments`)
-      .then((r) => setAttachments(r.data))
+      .then((r) => setAttachments(r.data.filter((a) => !a.docType)))
       .catch(() => undefined);
   }, [e.id]);
 
@@ -106,9 +130,27 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
       setBelowCost(false);
       router.refresh();
     } catch (err) {
+      const missingDocs = err instanceof ApiError ? err.details.filter((d) => d.code === "IMPORT_DOCS_MISSING") : [];
       if (err instanceof ApiError && err.details[0]?.code === "BELOW_COST" && caps.canFull) setBelowCost(true);
       if (err instanceof ApiError && err.status === 400 && err.fieldErrors().reason) setReasonError(err.fieldErrors().reason);
-      else {
+      else if (missingDocs.length) {
+        setModal(null);
+        setNotice({
+          kind: "error",
+          title: "Import documents are missing",
+          message: (
+            <>
+              Add these before posting:
+              <ul style={{ margin: "var(--space-2) 0 0", paddingLeft: "var(--space-5)" }}>
+                {missingDocs.map((d, i) => (
+                  <li key={i}>{d.message}</li>
+                ))}
+              </ul>
+            </>
+          ),
+        });
+        document.getElementById("import-documents")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
         setModal(null);
         setNotice({ kind: "error", title: "That didn't work", message: errorMessage(err) });
       }
@@ -146,7 +188,7 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
     setBusy("upload");
     try {
       await upload(`/stock-entries/${e.id}/attachments`, fd);
-      setAttachments((await api<{ data: Attachment[] }>(`/stock-entries/${e.id}/attachments`)).data);
+      setAttachments((await api<{ data: Attachment[] }>(`/stock-entries/${e.id}/attachments`)).data.filter((a) => !a.docType));
     } catch (err) {
       setNotice({ kind: "error", title: "Upload failed", message: errorMessage(err) });
     } finally {
@@ -165,10 +207,37 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
     }
   }
 
+  /** Saves the document details (PATCH import-shipment); never changes stock or cost. */
+  async function saveDocs() {
+    if (!docDraft) return;
+    setDocSaving(true);
+    setDocErrors({});
+    try {
+      const r = (await api<{ data: EntryDetailDto }>(`/stock-entries/${e.id}/import-shipment`, { method: "PATCH", body: shipmentBody(docDraft, caps.seeCost) })).data;
+      setE(r);
+      setShipment(toShipmentForm(r.importShipment));
+      if (r.importAttachments) setImportFiles(r.importAttachments);
+      setImportWarnings(r.importWarnings ?? []);
+      setDocDraft(null);
+      setNotice({ kind: "success", message: "Import document details saved." });
+    } catch (err) {
+      if (err instanceof ApiError && Object.keys(err.fieldErrors()).length) setDocErrors(err.fieldErrors());
+      else setNotice({ kind: "error", title: "Couldn't save the import documents", message: errorMessage(err) });
+    } finally {
+      setDocSaving(false);
+    }
+  }
+
   const x = e.actions;
+  const isImport = e.type === "GRN_IMPORT";
+  const requiredDocs = e.importDocsRequiredToPost ?? initial.importDocsRequiredToPost ?? DEFAULT_REQUIRED;
+  // Approve / Post are refused (422) while required documents are incomplete.
+  const docsMissing = isImport ? missingRequired(localChecklist(shipment, importFiles, requiredDocs)) : [];
+  const docsBlockTitle = missingTitle(docsMissing);
   const showPrice = e.lines.some((l) => "unitPrice" in l && l.unitPrice !== undefined);
   const showCost = caps.seeCost && e.type !== "TRANSFER";
-  const refs = Object.entries(e.references).filter(([, v]) => v);
+  // GRN (Imported): the bill of entry no. lives in the B/E document.
+  const refs = Object.entries(e.references).filter(([k, v]) => v && !(isImport && k === "billOfEntryNo"));
   const isTransferReceive = x.receive;
   const priceHeader = e.type === "SALE" ? "Unit price" : e.type === "GRN_IMPORT" ? `Unit price (${e.currency})` : "Unit cost";
 
@@ -188,6 +257,18 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
           <p className={styles.detailSub}>
             {e.typeLabel} · {e.warehouse.name}
             {e.toWarehouse ? ` → ${e.toWarehouse.name}` : ""} · {e.entryDate} · by {e.createdBy.name}
+            {isImport && shipment.blNo ? (
+              <>
+                {" "}
+                · BL <span className={styles.mono}>{shipment.blNo}</span>
+              </>
+            ) : null}
+            {isImport && shipment.boeNo ? (
+              <>
+                {" "}
+                · B/E <span className={styles.mono}>{shipment.boeNo}</span>
+              </>
+            ) : null}
           </p>
         </div>
         <div className={styles.detailActions}>
@@ -201,15 +282,20 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
               Submit for verification
             </Button>
           ) : null}
+          {/* Wrappers carry the tooltip naming missing import documents (disabled buttons get no hover). */}
           {x.post ? (
-            <Button onClick={() => act("post", belowCost ? { confirmBelowCost: true } : undefined, "Posted.")} disabled={!!busy}>
-              {e.type === "TRANSFER" ? "Dispatch" : "Post"}
-            </Button>
+            <span title={docsBlockTitle}>
+              <Button onClick={() => act("post", belowCost ? { confirmBelowCost: true } : undefined, "Posted.")} disabled={!!busy || docsMissing.length > 0}>
+                {e.type === "TRANSFER" ? "Dispatch" : "Post"}
+              </Button>
+            </span>
           ) : null}
           {x.approve ? (
-            <Button onClick={() => act("approve", belowCost ? { confirmBelowCost: true } : undefined, e.type === "TRANSFER" ? "Approved and dispatched." : "Approved and posted.")} disabled={!!busy}>
-              {busy === "approve" ? "Approving…" : belowCost ? "Approve below cost" : "Approve"}
-            </Button>
+            <span title={docsBlockTitle}>
+              <Button onClick={() => act("approve", belowCost ? { confirmBelowCost: true } : undefined, e.type === "TRANSFER" ? "Approved and dispatched." : "Approved and posted.")} disabled={!!busy || docsMissing.length > 0}>
+                {busy === "approve" ? "Approving…" : belowCost ? "Approve below cost" : "Approve"}
+              </Button>
+            </span>
           ) : null}
           {x.reject ? (
             <Button kind="danger" onClick={() => setModal("reject")} disabled={!!busy}>
@@ -314,6 +400,7 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
                       <th>Product</th>
                       <th className={styles.right}>Qty</th>
                       {e.lines.some((l) => l.condition === "DAMAGED") ? <th>Condition</th> : null}
+                      {isImport ? <th>Origin</th> : null}
                       {showPrice ? <th className={styles.right}>{priceHeader}</th> : null}
                       {showPrice ? <th className={styles.right}>Amount</th> : null}
                       {showCost ? <th className={styles.right}>Unit cost (৳)</th> : null}
@@ -348,6 +435,7 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
                           {l.adjustDirection ? <div className={styles.lineMeta}>{l.adjustDirection === "GAIN" ? "found" : "missing"}</div> : null}
                         </td>
                         {e.lines.some((y) => y.condition === "DAMAGED") ? <td>{l.condition === "DAMAGED" ? <Tag kind="red">Damaged</Tag> : "Good"}</td> : null}
+                        {isImport ? <td>{l.countryOfOrigin ?? "—"}</td> : null}
                         {showPrice ? <td className={`${styles.right} ${styles.num}`}>{formatAmount(l.unitPrice, e.type === "GRN_IMPORT" ? e.currency : "BDT")}</td> : null}
                         {showPrice ? <td className={`${styles.right} ${styles.num}`}>{formatMoney(l.amount)}</td> : null}
                         {showCost ? <td className={`${styles.right} ${styles.num}`}>{formatMoney(l.landedUnitCost ?? l.unitCostBdt)}</td> : null}
@@ -416,6 +504,42 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
                 <dd>{formatQty(e.totalQty)}</dd>
               </dl>
             </section>
+
+            {isImport ? (
+              <ImportDocuments
+                shipment={docDraft ?? shipment}
+                onChange={docDraft ? setDocDraft : undefined}
+                files={importFiles}
+                onFilesChange={(docType, update) => setImportFiles((f) => ({ ...f, [docType]: update(f[docType]) }))}
+                required={requiredDocs}
+                seeCost={caps.seeCost}
+                entryId={e.id}
+                canUpload={x.editImportDocs}
+                removeRule={(a) => removeRule(caps, { status: e.status, warehouseId: e.warehouse.id }, a)}
+                warnings={importWarnings}
+                errors={docErrors}
+                layout="gallery"
+                onError={(message) => setNotice({ kind: "error", message })}
+                actions={
+                  x.editImportDocs ? (
+                    docDraft ? (
+                      <>
+                        <Button kind="ghost" size="sm" onClick={() => (setDocDraft(null), setDocErrors({}))} disabled={docSaving}>
+                          Cancel
+                        </Button>
+                        <Button size="sm" onClick={saveDocs} disabled={docSaving}>
+                          {docSaving ? "Saving…" : "Save details"}
+                        </Button>
+                      </>
+                    ) : (
+                      <Button kind="secondary" size="sm" onClick={() => setDocDraft(shipment)}>
+                        Edit details
+                      </Button>
+                    )
+                  ) : null
+                }
+              />
+            ) : null}
 
             {x.editLandedCost ? (
               <LandedCostEditor
@@ -702,20 +826,20 @@ function LandedCostEditor({ entry, onSaved, onError }: { entry: EntryDto; onSave
                 return (
                   <tr key={c.key}>
                     <td>
-                      <select className={styles.cellInput} aria-label={`Charge type ${i + 1}`} value={c.type} onChange={(ev) => upd({ type: ev.target.value as ChargeRow["type"], includeInCost: !["IMPORT_VAT", "AIT"].includes(ev.target.value) })}>
+                      <Select className={styles.cellInput} aria-label={`Charge type ${i + 1}`} value={c.type} onChange={(ev) => upd({ type: ev.target.value as ChargeRow["type"], includeInCost: !["IMPORT_VAT", "AIT"].includes(ev.target.value) })}>
                         {CHARGE_TYPES.map(([v, label]) => (
                           <option key={v} value={v}>
                             {label}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                       {c.type === "OTHER" ? <input className={styles.cellInput} style={{ marginTop: "var(--space-2)" }} aria-label="Charge label" placeholder="Label" value={c.label} onChange={(ev) => upd({ label: ev.target.value })} /> : null}
                     </td>
                     <td>
-                      <select className={styles.cellInput} aria-label={`Charge basis ${i + 1}`} value={c.mode} onChange={(ev) => upd({ mode: ev.target.value as ChargeRow["mode"] })}>
+                      <Select className={styles.cellInput} aria-label={`Charge basis ${i + 1}`} value={c.mode} onChange={(ev) => upd({ mode: ev.target.value as ChargeRow["mode"] })}>
                         <option value="PERCENT_OF_GOODS">% of goods</option>
                         <option value="AMOUNT_BDT">Amount ৳</option>
-                      </select>
+                      </Select>
                     </td>
                     <td className={styles.right}>
                       <input className={styles.cellInput} inputMode="decimal" aria-label={`Charge value ${i + 1}`} value={c.value} onChange={(ev) => upd({ value: ev.target.value })} />

@@ -171,8 +171,10 @@ describe("pause, resume and run now", () => {
     expect(toAdmin.attachments![0]!.fileKey).toBe(toBoss.attachments![0]!.fileKey); // externals get the owner's view
     expect(await headers(toAdmin.attachments![0]!.fileKey)).toContain("Margin");
     const accHead = await headers(toAcc.attachments![0]!.fileKey);
-    expect(accHead).toContain("Total cost");
+    expect(accHead).toContain("Direct cost"); // Accounts has overhead access (owner Admin too)
+    expect(accHead).toContain("Full cost");
     expect(accHead).not.toContain("Margin");
+    expect(accHead).not.toContain("Direct margin");
     expect(accHead).not.toContain("Contract value");
 
     const history = await runs(s.id);

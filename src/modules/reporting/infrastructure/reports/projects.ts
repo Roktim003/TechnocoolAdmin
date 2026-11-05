@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { PROJECT_STATUS_LABEL, PROJECT_STATUSES } from "@/modules/projects/domain/types";
 import { dhakaDate } from "../../domain/schedule";
-import type { ReportRow } from "../../domain/types";
+import type { ChartSpec, ReportRow } from "../../domain/types";
+import { seesOverheads } from "../../domain/visibility";
 import { date, defineReport, moneyCol, moneyTotal, percentCol, PROJECT_STATUS_TAGS, qtyCol, qtyTotal, str, tagCol, text, countTotal, rowsOnly } from "../columns";
 import { int, like, money, orderBy, qty, sql, uuidArray, where, zeroMoney, zeroQty, type Sql } from "../sql";
 import { P } from "./common";
@@ -26,19 +27,25 @@ function materialMovements(scope: string[], from?: Date, to?: Date): Sql {
 
 /* ───────────────────────── 9. Project cost summary ───────────────────────── */
 
+const TOTAL_COST_CHART: ChartSpec = { type: "hbar", title: "Total cost by project", valueType: "money", requires: "seeCost" };
+const FULL_COST_CHART: ChartSpec = { type: "hbar", title: "Full cost by project (incl. overheads)", valueType: "money", requires: "overheads" };
+
 export const projectCostSummary = defineReport({
   meta: {
     id: "project-cost-summary",
     number: 9,
     title: "Project cost summary",
     group: "Projects",
-    description: "Per project: net material (issued − returned, at ledger cost), labour, transport and other costs (voided costs excluded), total cost, and — with contract & margin access — contract value, margin and margin %. A date range limits the costs to that period.",
+    description:
+      "Per project: net material (issued − returned, at ledger cost), labour, transport and other costs (voided costs excluded), total (direct) cost, and — with contract & margin access — contract value, margin and margin %. With overhead access also store charge, holding and established cost, full cost (direct + overheads), margin on full cost and the direct margin. A date range limits the costs to that period.",
     landscape: true,
   },
   params: [{ key: "status", label: "Status", kind: "select", options: PROJECT_STATUSES.map((s) => ({ value: s, label: PROJECT_STATUS_LABEL[s] })) }, { ...P.dateFrom(), default: undefined }, { ...P.dateTo(), default: undefined }, P.q("Project code, name or client")],
-  sortFields: ["code", "name", "total", "margin"],
+  sortFields: ["code", "name", "total", "full", "margin"],
   defaultSort: "code",
-  columns: () => [
+  // Same figures as the project screen (projects `summarize()`): without overhead access the
+  // cost is the direct cost ("Total cost") and margins are on it; with it, margins are on full cost.
+  columns: (_w, f) => [
     text("code", "Code", { sortKey: "code", link: true, width: 10 }),
     text("name", "Project", { sortKey: "name", width: 30 }),
     text("client", "Client", { width: 24 }),
@@ -47,27 +54,41 @@ export const projectCostSummary = defineReport({
     moneyCol("labourCost", "Labour"),
     moneyCol("transportCost", "Transport"),
     moneyCol("otherCost", "Other"),
-    moneyCol("totalCost", "Total cost", "seeCost", { sortKey: "total" }),
+    moneyCol("totalCost", seesOverheads(f) ? "Direct cost" : "Total cost", "seeCost", { sortKey: "total" }),
+    moneyCol("storeChargeCost", "Store charge", "overheads"),
+    moneyCol("holdingCost", "Holding cost", "overheads"),
+    moneyCol("establishmentCost", "Established cost", "overheads"),
+    moneyCol("overheadCost", "Overheads", "overheads"),
+    moneyCol("fullCost", "Full cost", "overheads", { sortKey: "full" }),
     moneyCol("contractValue", "Contract value", "seeMargin"),
     moneyCol("margin", "Margin", "seeMargin", { sortKey: "margin", negativeRed: true }),
     percentCol("marginPercent", "Margin %", "seeMargin", { decimals: 2 }),
+    moneyCol("directMargin", "Direct margin", ["overheads", "seeMargin"], { negativeRed: true }),
+    percentCol("directMarginPercent", "Direct margin %", ["overheads", "seeMargin"], { decimals: 2 }),
   ],
-  totals: [
+  totals: (f) => [
     countTotal("projects", "Projects"),
     moneyTotal("materialCost", "Material"),
     moneyTotal("labourCost", "Labour"),
     moneyTotal("transportCost", "Transport"),
     moneyTotal("otherCost", "Other"),
-    moneyTotal("totalCost", "Total cost"),
+    moneyTotal("totalCost", seesOverheads(f) ? "Direct cost" : "Total cost"),
+    moneyTotal("storeChargeCost", "Store charge", "overheads"),
+    moneyTotal("holdingCost", "Holding cost", "overheads"),
+    moneyTotal("establishmentCost", "Established cost", "overheads"),
+    moneyTotal("overheadCost", "Overheads", "overheads"),
+    moneyTotal("fullCost", "Full cost", "overheads"),
     moneyTotal("contractValue", "Contract value", "seeMargin"),
     moneyTotal("margin", "Margin", "seeMargin"),
+    moneyTotal("directMargin", "Direct margin", ["overheads", "seeMargin"]),
   ],
-  chart: (f) => (f.seeCost ? { type: "hbar", title: "Total cost by project", valueType: "money", requires: "seeCost" } : null),
+  chart: (f) => (seesOverheads(f) ? FULL_COST_CHART : f.seeCost ? TOTAL_COST_CHART : null),
   async query(db, p, req, ctx) {
     const from = date(p, "dateFrom");
     const to = date(p, "dateTo");
     const status = str(p, "status");
     const q = str(p, "q");
+    const oh = seesOverheads(ctx.viewer.flags);
     const base = sql`
       WITH mat AS (
         SELECT "projectId", -SUM("valueChange") AS cost FROM (${materialMovements(ctx.scope, from, to)}) x GROUP BY 1
@@ -75,23 +96,55 @@ export const projectCostSummary = defineReport({
         SELECT "projectId",
                SUM(CASE WHEN category = 'LABOUR' THEN amount ELSE 0 END) AS labour,
                SUM(CASE WHEN category = 'TRANSPORT' THEN amount ELSE 0 END) AS transport,
-               SUM(CASE WHEN category = 'OTHER' THEN amount ELSE 0 END) AS other
+               SUM(CASE WHEN category = 'OTHER' THEN amount ELSE 0 END) AS other,
+               SUM(CASE WHEN category = 'STORE_CHARGE' THEN amount ELSE 0 END) AS store,
+               SUM(CASE WHEN category = 'HOLDING' THEN amount ELSE 0 END) AS holding,
+               SUM(CASE WHEN category = 'ESTABLISHMENT' THEN amount ELSE 0 END) AS established
         FROM "ProjectCost" WHERE "voidedAt" IS NULL
           ${from ? sql`AND date >= ${dhakaDate(from)}::date` : sql``} ${to ? sql`AND date <= ${dhakaDate(to)}::date` : sql``}
         GROUP BY 1
       ), base AS (
         SELECT pr.id, pr.code, pr.name, pr."clientName" AS client, pr.status::text AS status, pr."contractValue" AS contract,
                COALESCE(mat.cost, 0) AS material, COALESCE(oc.labour, 0) AS labour, COALESCE(oc.transport, 0) AS transport, COALESCE(oc.other, 0) AS other,
-               COALESCE(mat.cost, 0) + COALESCE(oc.labour, 0) + COALESCE(oc.transport, 0) + COALESCE(oc.other, 0) AS total
+               COALESCE(mat.cost, 0) + COALESCE(oc.labour, 0) + COALESCE(oc.transport, 0) + COALESCE(oc.other, 0) AS total,
+               COALESCE(oc.store, 0) AS store, COALESCE(oc.holding, 0) AS holding, COALESCE(oc.established, 0) AS established
         FROM "Project" pr LEFT JOIN mat ON mat."projectId" = pr.id LEFT JOIN oc ON oc."projectId" = pr.id
         WHERE ${where([status ? sql`pr.status = ${status}::"ProjectStatus"` : null, q ? sql`(pr.code ILIKE ${like(q)} OR pr.name ILIKE ${like(q)} OR pr."clientName" ILIKE ${like(q)})` : null])}
+      ), costs AS (
+        SELECT base.*, store + holding + established AS overhead, total + store + holding + established AS fullcost FROM base
       ), calc AS (
-        SELECT base.*, CASE WHEN contract IS NULL THEN NULL ELSE contract - total END AS margin,
-               CASE WHEN contract IS NULL OR contract = 0 THEN NULL ELSE ROUND((contract - total) / contract * 100, 2) END AS pct
-        FROM base
+        SELECT costs.*,
+               CASE WHEN contract IS NULL THEN NULL ELSE contract - fullcost END AS margin,
+               CASE WHEN contract IS NULL OR contract = 0 THEN NULL ELSE ROUND((contract - fullcost) / contract * 100, 2) END AS pct,
+               CASE WHEN contract IS NULL THEN NULL ELSE contract - total END AS dmargin,
+               CASE WHEN contract IS NULL OR contract = 0 THEN NULL ELSE ROUND((contract - total) / contract * 100, 2) END AS dpct
+        FROM costs
       )`;
-    const sort = orderBy(req.sort, { code: sql`code`, name: sql`name`, total: sql`total`, margin: sql`margin` }, sql`code`);
-    type Row = { id: string; code: string; name: string; client: string | null; status: string; contract: D | null; material: D; labour: D; transport: D; other: D; total: D; margin: D | null; pct: D | null };
+    // Without overhead access, "full" and "margin" sort on the direct figures (no ordering by hidden values).
+    const sort = orderBy(req.sort, { code: sql`code`, name: sql`name`, total: sql`total`, full: oh ? sql`fullcost` : sql`total`, margin: oh ? sql`margin` : sql`dmargin` }, sql`code`);
+    type Row = {
+      id: string;
+      code: string;
+      name: string;
+      client: string | null;
+      status: string;
+      contract: D | null;
+      material: D;
+      labour: D;
+      transport: D;
+      other: D;
+      total: D;
+      store: D;
+      holding: D;
+      established: D;
+      overhead: D;
+      fullcost: D;
+      margin: D | null;
+      pct: D | null;
+      dmargin: D | null;
+      dpct: D | null;
+    };
+    const pct = (v: D | null) => (v === null ? null : v.toFixed(2));
     const rows = await db.$queryRaw<Row[]>`${base} SELECT * FROM calc ORDER BY ${sort} LIMIT ${req.pageSize} OFFSET ${req.offset}`;
     const out: ReportRow[] = rows.map((r) => ({
       code: r.code,
@@ -104,15 +157,30 @@ export const projectCostSummary = defineReport({
       otherCost: money(r.other),
       totalCost: money(r.total),
       contractValue: money(r.contract),
-      margin: money(r.margin),
-      marginPercent: r.pct === null ? null : r.pct.toFixed(2),
+      margin: money(oh ? r.margin : r.dmargin),
+      marginPercent: pct(oh ? r.pct : r.dpct),
+      // Overhead figures are only put in the row for overhead viewers (the engine strips them anyway).
+      ...(oh
+        ? {
+            storeChargeCost: money(r.store),
+            holdingCost: money(r.holding),
+            establishmentCost: money(r.established),
+            overheadCost: money(r.overhead),
+            fullCost: money(r.fullcost),
+            directMargin: money(r.dmargin),
+            directMarginPercent: pct(r.dpct),
+          }
+        : {}),
       _links: { code: `/projects/${r.id}` },
     }));
     if (!req.summary) return rowsOnly(out);
-    const [s] = await db.$queryRaw<{ n: bigint; material: D | null; labour: D | null; transport: D | null; other: D | null; total: D | null; contract: D | null; margin: D | null }[]>`${base}
+    type Sum = { n: bigint; material: D | null; labour: D | null; transport: D | null; other: D | null; total: D | null; store: D | null; holding: D | null; established: D | null; overhead: D | null; fullcost: D | null; contract: D | null; margin: D | null; dmargin: D | null };
+    const [s] = await db.$queryRaw<Sum[]>`${base}
       SELECT COUNT(*) AS n, SUM(material) AS material, SUM(labour) AS labour, SUM(transport) AS transport, SUM(other) AS other, SUM(total) AS total,
-             SUM(contract) AS contract, SUM(margin) AS margin FROM calc`;
-    const top = await db.$queryRaw<{ code: string; name: string; total: D }[]>`${base} SELECT code, name, total FROM calc WHERE total <> 0 ORDER BY total DESC LIMIT 15`;
+             SUM(store) AS store, SUM(holding) AS holding, SUM(established) AS established, SUM(overhead) AS overhead, SUM(fullcost) AS fullcost,
+             SUM(contract) AS contract, SUM(margin) AS margin, SUM(dmargin) AS dmargin FROM calc`;
+    const plotted = oh ? sql`fullcost` : sql`total`;
+    const top = await db.$queryRaw<{ code: string; name: string; v: D }[]>`${base} SELECT code, name, ${plotted} AS v FROM calc WHERE ${plotted} <> 0 ORDER BY ${plotted} DESC, code LIMIT 15`;
     return {
       rows: out,
       total: int(s?.n),
@@ -124,9 +192,19 @@ export const projectCostSummary = defineReport({
         otherCost: zeroMoney(s?.other),
         totalCost: zeroMoney(s?.total),
         contractValue: zeroMoney(s?.contract),
-        margin: zeroMoney(s?.margin),
+        margin: zeroMoney(oh ? s?.margin : s?.dmargin),
+        ...(oh
+          ? {
+              storeChargeCost: zeroMoney(s?.store),
+              holdingCost: zeroMoney(s?.holding),
+              establishmentCost: zeroMoney(s?.established),
+              overheadCost: zeroMoney(s?.overhead),
+              fullCost: zeroMoney(s?.fullcost),
+              directMargin: zeroMoney(s?.dmargin),
+            }
+          : {}),
       },
-      chart: { type: "hbar", title: "Total cost by project", valueType: "money", requires: "seeCost", points: top.map((t) => ({ label: `${t.code} ${t.name}`, values: [zeroMoney(t.total)] })) },
+      chart: { ...(oh ? FULL_COST_CHART : TOTAL_COST_CHART), points: top.map((t) => ({ label: `${t.code} ${t.name}`, values: [zeroMoney(t.v)] })) },
     };
   },
 });

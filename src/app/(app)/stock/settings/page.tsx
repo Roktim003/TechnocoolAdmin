@@ -6,6 +6,7 @@ import { inventory } from "@/modules/inventory/interface/container";
 import { stockAccess } from "../_lib/access";
 import { InventorySettingsForm } from "../_components/InventorySettingsForm";
 import { AlertSettingsForm } from "../_components/AlertSettingsForm";
+import styles from "../_components/stock.module.css";
 
 export const metadata: Metadata = { title: "Inventory settings" };
 
@@ -15,7 +16,7 @@ export default async function InventorySettingsPage() {
   const [settings, alerts] = await Promise.all([inventory().masters.settings(), inventory().alerts.settings()]);
   return (
     <>
-      <PageHeader title="Inventory settings" description={<Link href="/stock">← Stock in / out</Link>} />
+      <PageHeader title="Inventory settings" description={<Link href="/stock" className={styles.link}>← Stock in / out</Link>} />
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
         <InventorySettingsForm initial={settings} />
         <AlertSettingsForm initial={alerts} />

@@ -1,7 +1,12 @@
-/** Carbon data-visualisation palette (categorical, in this order) and chart chrome colours. */
-export const CHART_PALETTE = ["#6929c4", "#1192e8", "#005d5d", "#9f1853", "#fa4d56", "#570408", "#198038", "#002d9c"] as const;
-export const CHART_AXIS = "#525252";
-export const CHART_GRID = "#e0e0e0";
+/**
+ * Categorical chart palette, built from Gr8r Studio hues and re-ordered with the dataviz validator
+ * (light surface #ffffff): lightness band, chroma floor, adjacent CVD ΔE ≥ 13 and normal-vision ΔE ≥ 23 all pass.
+ * Slot 5 (orange) is under 3:1 on white, so charts always keep a table view and text labels.
+ * Assign in this order, never cycled past 8.
+ */
+export const CHART_PALETTE = ["#4b5bd6", "#8f620a", "#4b97e0", "#b8336e", "#e5893b", "#2f7a4f", "#9d6fe0", "#13917f"] as const;
+export const CHART_AXIS = "#6b6760";
+export const CHART_GRID = "#f0eeea";
 
 export const seriesColor = (i: number) => CHART_PALETTE[i % CHART_PALETTE.length]!;
 

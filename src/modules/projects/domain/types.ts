@@ -24,10 +24,31 @@ export const PROJECT_TYPE_LABEL: Record<ProjectType, string> = {
   OTHER: "Other",
 };
 
-export const COST_CATEGORIES = ["LABOUR", "TRANSPORT", "OTHER"] as const;
+/** Direct costs (projects ≥ CREATE). */
+export const DIRECT_COST_CATEGORIES = ["LABOUR", "TRANSPORT", "OTHER"] as const;
+/**
+ * Overheads, entered manually (overheads ≥ CREATE): never part of stock value, only of the
+ * project's full cost and margin.
+ */
+export const OVERHEAD_CATEGORIES = ["STORE_CHARGE", "HOLDING", "ESTABLISHMENT"] as const;
+export type OverheadCategory = (typeof OVERHEAD_CATEGORIES)[number];
+export const COST_CATEGORIES = [...DIRECT_COST_CATEGORIES, ...OVERHEAD_CATEGORIES] as const;
 export type CostCategory = (typeof COST_CATEGORIES)[number];
 
-export const COST_CATEGORY_LABEL: Record<CostCategory, string> = { LABOUR: "Labour", TRANSPORT: "Transport", OTHER: "Other" };
+export const COST_CATEGORY_LABEL: Record<CostCategory, string> = {
+  LABOUR: "Labour",
+  TRANSPORT: "Transport",
+  OTHER: "Other",
+  STORE_CHARGE: "Store charge",
+  HOLDING: "Holding cost",
+  ESTABLISHMENT: "Established cost (overhead)",
+};
+
+export const isOverhead = (c: CostCategory): c is OverheadCategory => (OVERHEAD_CATEGORIES as readonly string[]).includes(c);
+
+/** Warnings (never blocking): one overhead line above BDT 10,00,000, or overheads above 30 % of direct cost. */
+export const OVERHEAD_WARN_SINGLE_AMOUNT = "1000000.00";
+export const OVERHEAD_WARN_PERCENT_OF_DIRECT = 30;
 
 /** Who may make a status change: projects CREATE, projects FULL, or the built-in Admin role. */
 export type TransitionLevel = "CREATE" | "FULL" | "ADMIN";

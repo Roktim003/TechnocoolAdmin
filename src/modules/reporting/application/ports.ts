@@ -1,8 +1,7 @@
 import type { ActorContext } from "@/modules/audit/application/audit.service";
 import type { ListQuery, SortField } from "@/shared/pagination/list-query";
-import type { SensitiveFlags } from "@/shared/rbac/levels";
 import type { Frequency } from "../domain/schedule";
-import type { ChartData, ChartSpec, ColumnDef, ParamDef, ReportMeta, ReportRow, ReportTotals, ReportViewer, RowActionDef, TotalDef } from "../domain/types";
+import type { ChartData, ChartSpec, ColumnDef, ParamDef, ReportFlags, ReportMeta, ReportRow, ReportTotals, ReportViewer, Requires, RowActionDef, TotalDef } from "../domain/types";
 
 /* ───────────────────────── report engine ───────────────────────── */
 
@@ -52,10 +51,17 @@ export interface ReportDefinition {
   /** Sort keys accepted by `sort` (column `sortKey`s). */
   sortFields: string[];
   defaultSort: string;
-  columns(warehouses: WarehouseRef[]): ColumnDef[];
-  totals: TotalDef[];
+  /**
+   * The report as a whole needs these flags (e.g. `"overheads"`): without them it is left out of
+   * the catalog and running, exporting or scheduling it is a 403.
+   */
+  requires?: Requires;
+  /** Every column the report can have; the engine keeps those the viewer's flags allow (labels may depend on the flags). */
+  columns(warehouses: WarehouseRef[], flags: ReportFlags): ColumnDef[];
+  /** Totals (or totals for these flags); the engine keeps those the viewer's flags allow. */
+  totals: TotalDef[] | ((flags: ReportFlags) => TotalDef[]);
   /** The chart shown for these flags (null: no chart for this viewer). */
-  chart?(flags: SensitiveFlags): ChartSpec | null;
+  chart?(flags: ReportFlags): ChartSpec | null;
   rowAction?: RowActionDef;
   run(params: ParsedParams, req: RunRequest, ctx: RunContext): Promise<RunOutput>;
 }
@@ -176,9 +182,9 @@ export interface ScheduleRecord extends ScheduleInput {
   updatedAt: Date;
 }
 
-/** Who a generated file was made for: a recipient never gets data beyond these. */
+/** Who a generated file was made for: a recipient never gets data beyond these (flags incl. overhead access). */
 export interface FileAudience {
-  flags: SensitiveFlags;
+  flags: ReportFlags;
   warehouseIds: string[];
 }
 

@@ -7,11 +7,15 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { SelectField, TextField } from "@/components/ui/Field";
 import { Notification } from "@/components/ui/Notification";
 import { Pagination } from "@/components/ui/Pagination";
+import { Icon } from "@/components/ui/Icon";
 import { Tag } from "@/components/ui/Tag";
 import { api, errorMessage, type Page } from "@/lib/api-client";
 import { formatMoney } from "@/shared/time/format";
 import { ENTRY_TYPE_META, formatQty, STATUS_LABEL, STATUS_TAG, type EntryDto, type EntryType, type StockCaps, type WarehouseDto } from "./types";
+import { DocChecklist } from "./ImportDocuments";
+import type { EntryDetailDto } from "./import-docs";
 import styles from "./stock.module.css";
+import importStyles from "./import-docs.module.css";
 
 interface Props {
   caps: StockCaps;
@@ -34,7 +38,7 @@ export function EntryList({ caps, warehouses, mode, onCount }: Props) {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [result, setResult] = useState<Page<EntryDto> | null>(null);
+  const [result, setResult] = useState<Page<EntryDetailDto> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +53,7 @@ export function EntryList({ caps, warehouses, mode, onCount }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await api<Page<EntryDto>>("/stock-entries", {
+      const r = await api<Page<EntryDetailDto>>("/stock-entries", {
         query: { page, pageSize, q: debouncedQ, type, status: mode === "pending" ? undefined : status, warehouseId, dateFrom, dateTo, ...(mode === "pending" ? { awaitingMyApproval: "true", sort: "createdAt" } : {}) },
       });
       setResult(r);
@@ -66,7 +70,8 @@ export function EntryList({ caps, warehouses, mode, onCount }: Props) {
     void load();
   }, [load]);
 
-  const columns: Column<EntryDto>[] = [
+  const imports = type === "GRN_IMPORT";
+  const columns: Column<EntryDetailDto>[] = [
     {
       key: "number",
       header: "Number",
@@ -77,7 +82,39 @@ export function EntryList({ caps, warehouses, mode, onCount }: Props) {
       ),
     },
     { key: "date", header: "Date", render: (e) => <span className={styles.nowrap}>{e.entryDate}</span> },
-    { key: "type", header: "Type", render: (e) => <span className={styles.nowrap}>{e.typeLabel}</span> },
+    {
+      key: "type",
+      header: "Type",
+      render: (e) => (
+        <>
+          <span className={styles.nowrap}>{e.typeLabel}</span>
+          {e.documentsChecklist ? (
+            <div className={importStyles.listChecklist}>
+              <DocChecklist items={e.documentsChecklist} compact />
+            </div>
+          ) : null}
+        </>
+      ),
+    },
+    // Filtered to GRN (Imported): the shipment references and the number of document files.
+    ...(imports
+      ? ([
+          { key: "bl", header: "BL no.", render: (e) => <span className={styles.mono}>{e.importShipment?.blNo ?? "—"}</span> },
+          { key: "boe", header: "B/E no.", render: (e) => <span className={styles.mono}>{e.importShipment?.boeNo ?? "—"}</span> },
+          {
+            key: "files",
+            header: <span className="visually-hidden">Document files</span>,
+            render: (e) =>
+              e.importDocFileCount ? (
+                <span className={importStyles.clip} title={`${e.importDocFileCount} document file(s)`}>
+                  <Icon name="paperclip" size={13} />
+                  {e.importDocFileCount}
+                  <span className="visually-hidden"> files</span>
+                </span>
+              ) : null,
+          },
+        ] satisfies Column<EntryDetailDto>[])
+      : []),
     { key: "warehouse", header: "Warehouse", render: (e) => e.warehouse.code },
     { key: "party", header: "Supplier / customer / project", render: (e) => party(e) },
     { key: "qty", header: "Items", align: "end", render: (e) => <span className={styles.num}>{e.itemCount} · {formatQty(e.totalQty)}</span> },
@@ -88,12 +125,12 @@ export function EntryList({ caps, warehouses, mode, onCount }: Props) {
       render: (e) => <span className={styles.num}>{e.type === "SALE" ? formatMoney(e.grandTotal) : caps.seeCost && e.costTotal !== undefined ? formatMoney(e.costTotal) : "—"}</span>,
     },
     { key: "status", header: "Status", render: (e) => <Tag kind={STATUS_TAG[e.status]}>{STATUS_LABEL[e.status]}</Tag> },
-    { key: "by", header: "Created by", render: (e) => <span className={styles.nowrap}>{e.createdBy.name}</span> },
+    { key: "by", header: "Created by", render: (e) => <span>{e.createdBy.name}</span> },
   ];
 
   const toolbar = (
     <div className={styles.toolbar}>
-      <TextField label="Search" placeholder="Number, reference, party…" value={q} onChange={(e) => setQ(e.target.value)} fieldClassName={styles.search} />
+      <TextField label="Search" placeholder={imports ? "Number, BL / CI / B/E / container no…" : "Number, reference, party…"} value={q} onChange={(e) => setQ(e.target.value)} fieldClassName={styles.search} />
       <SelectField label="Type" value={type} onChange={(e) => (setType(e.target.value), setPage(1))} fieldClassName={styles.filter}>
         <option value="">All types</option>
         {(Object.keys(ENTRY_TYPE_META) as EntryType[]).map((t) => (

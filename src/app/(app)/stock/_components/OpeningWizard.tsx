@@ -144,9 +144,9 @@ export function OpeningWizard({ caps, initialLocks }: { caps: StockCaps; initial
     <div className={styles.stack}>
       <ol className={styles.cards} aria-label="Steps" style={{ listStyle: "none", padding: 0, margin: 0 }}>
         {STEP.map((label, i) => (
-          <li key={label} className={styles.card} style={{ boxShadow: step === i + 1 ? "inset 0 3px 0 var(--color-primary)" : undefined, opacity: step >= i + 1 ? 1 : 0.6 }} aria-current={step === i + 1 ? "step" : undefined}>
+          <li key={label} className={styles.card} style={{ borderColor: step === i + 1 ? "var(--accent)" : undefined, opacity: step >= i + 1 ? 1 : 0.6 }} aria-current={step === i + 1 ? "step" : undefined}>
             <div className={styles.cardLabel}>Step {i + 1}</div>
-            <div style={{ marginTop: "var(--space-2)" }}>{label}</div>
+            <div style={{ marginTop: "var(--s-1)" }}>{label}</div>
           </li>
         ))}
       </ol>
@@ -248,7 +248,7 @@ export function OpeningWizard({ caps, initialLocks }: { caps: StockCaps; initial
         <p className={styles.sectionHelp} style={{ marginBottom: "var(--space-5)" }}>
           After locking, opening stock entries and imports for that warehouse are refused. Only an Admin can lock or unlock (unlocking needs a reason and is recorded).
         </p>
-        <div className={styles.cards}>
+        <div className={styles.cards} style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
           {locks.map((w) => (
             <div key={w.id} className={styles.card} style={{ background: "var(--color-background)" }}>
               <div className={styles.cardLabel}>{w.name}</div>

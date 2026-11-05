@@ -2,6 +2,7 @@ import type { ActorContext, AuditService } from "@/modules/audit/application/aud
 import type { ListQuery } from "@/shared/pagination/list-query";
 import type { PermissionLevel } from "@/shared/rbac/levels";
 import type { AdjustDirection, ChargeMode, ChargeType, Condition, Currency, EntryStatus, EntryType, ProductCostState, ProjectStatus, SerialStatus } from "../domain/types";
+import type { AttachmentDocType, DuplicateDoc, ImportDocType, ImportShipmentData } from "../domain/import-docs";
 import type { BalanceFilters, EntryFilters, MasterFilters, MovementFilters, SerialFilters } from "./dto";
 import type { CountStore } from "./count.service";
 import type { OpeningStore } from "./opening.service";
@@ -49,6 +50,8 @@ export interface LineRecord {
   adjustDirection: AdjustDirection | null;
   /** GRN lines received against a purchase order line. */
   purchaseOrderLineId: string | null;
+  /** GRN (Imported) lines. */
+  countryOfOrigin: string | null;
   note: string | null;
   serials: { serial: string; serialId: string | null; received: boolean }[];
 }
@@ -126,6 +129,10 @@ export interface EntryRecord extends EntryRefs {
   lines: LineRecord[];
   charges: ChargeRecord[];
   attachmentCount: number;
+  /** Shipment documents (GRN Imported). `billOfEntryNo` above mirrors its boeNo. */
+  importShipment: ImportShipmentData | null;
+  /** Attachments per import document type (BL, CO, PL, CI, BOE, OTHER). */
+  docFileCounts: Partial<Record<AttachmentDocType, number>>;
 }
 
 /** Writable entry fields (what a draft / edit stores). */
@@ -151,10 +158,13 @@ export interface EntryWrite extends EntryRefs {
     originalLineId: string | null;
     adjustDirection?: AdjustDirection | null;
     purchaseOrderLineId?: string | null;
+    countryOfOrigin?: string | null;
     note: string | null;
     serials: string[];
   }[];
   charges: { type: ChargeType; mode: ChargeMode; value: string; includeInCost: boolean; label: string | null }[];
+  /** GRN (Imported) documents to store; undefined keeps the stored ones. */
+  importShipment?: ImportShipmentData;
 }
 
 export interface ProductInfo {
@@ -164,6 +174,7 @@ export interface ProductInfo {
   trackSerial: boolean;
   status: "ACTIVE" | "DISCONTINUED";
   sellingPrice: string;
+  countryOfOrigin: string | null;
 }
 
 export interface BalanceKey {
@@ -215,6 +226,8 @@ export interface InventorySettings {
   adminWriteOffNeedsApproval: boolean;
   allowAdminBelowCostSale: boolean;
   fiscalYearStartMonth: number;
+  /** Import documents that must have a number and a file before a GRN (Imported) is posted. */
+  importDocsRequiredToPost: ImportDocType[];
 }
 
 export interface Customer {
@@ -238,6 +251,9 @@ export interface AttachmentRecord {
   mimeType: string;
   size: number;
   label: string | null;
+  /** Import document type; null for ordinary attachments. */
+  docType: AttachmentDocType | null;
+  thumbnailKey: string | null;
   uploadedBy: Ref;
   createdAt: Date;
 }
@@ -349,6 +365,12 @@ export interface InventoryStore {
   attachment(id: string): Promise<AttachmentRecord | null>;
   addAttachment(data: Omit<AttachmentRecord, "id" | "createdAt" | "uploadedBy"> & { uploadedById: string }): Promise<AttachmentRecord>;
   deleteAttachment(id: string): Promise<void>;
+
+  // import documents (GRN Imported)
+  /** Creates or replaces the entry's shipment document details. */
+  saveImportShipment(entryId: string, data: ImportShipmentData): Promise<void>;
+  /** Other GRN (Imported) entries (not cancelled) using the same BL, CI or B/E number. */
+  importDuplicates(values: { blNo?: string | null; ciNo?: string | null; boeNo?: string | null }, exceptEntryId: string | null): Promise<DuplicateDoc[]>;
 }
 
 export type EntryEvent = "submitted" | "posted" | "approved" | "rejected" | "cancelled" | "dispatched" | "received" | "reversed";

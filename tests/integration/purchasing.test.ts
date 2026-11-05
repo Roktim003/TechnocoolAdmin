@@ -22,7 +22,7 @@ import { getQueue, QUEUES } from "@/shared/queue/queue";
 import { call } from "../helpers/http";
 import { resetDatabase } from "../helpers/db";
 import { adminToken } from "../helpers/fixtures";
-import { approve, availability, key, prisma, product, reject, reverse, supplier, userToken, wh } from "../helpers/inventory";
+import { approve, availability, key, noImportDocsRequired, prisma, product, reject, reverse, supplier, userToken, wh } from "../helpers/inventory";
 import {
   amendPo,
   approvedPo,
@@ -389,6 +389,7 @@ describe("purchasing permissions and cost visibility", () => {
   });
 
   it("a verifier with seeCost sets landed charges and the customs rate on a pending import GRN", async () => {
+    await noImportDocsRequired(); // about landed cost, not import documents
     const p = await product(token);
     const i = await po(token, { action: "approve", supplierId: await foreign(), deliverToWarehouseId: A, exchangeRate: "120", lines: [{ productId: p.id, qty: 10, unitPrice: "100" }] });
     const store = await userToken(token, "Store Manager", ["A"]);

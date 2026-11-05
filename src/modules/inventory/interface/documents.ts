@@ -110,7 +110,9 @@ export async function processDocumentJob(job: Job, log: Logger) {
   } else {
     const e = await inventory().uow.store.entry(data.entryId);
     if (!e) throw new Error("Entry no longer exists.");
-    html = renderDocumentHtml(e, data.kind, { ...meta, showCost: data.showCost });
+    // GRN (Imported): the Shipment documents block lists the import-document files by name.
+    const importFiles = e.type === "GRN_IMPORT" ? (await inventory().uow.store.attachments("StockEntry", e.id)).filter((a) => a.docType).map((a) => ({ docType: a.docType!, fileName: a.fileName })) : [];
+    html = renderDocumentHtml(e, data.kind, { ...meta, showCost: data.showCost, importFiles });
     fileName = `${(e.number ?? e.draftRef).replace(/[^\w-]/g, "_")}-${data.kind.toLowerCase().replace(/_/g, "-")}.pdf`;
   }
   const { htmlToPdf } = await import("../infrastructure/pdf");

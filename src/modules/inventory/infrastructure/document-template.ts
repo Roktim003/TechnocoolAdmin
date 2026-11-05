@@ -1,5 +1,6 @@
 import type { DocumentKind } from "../application/dto";
 import type { EntryRecord } from "../application/ports";
+import { EMPTY_SHIPMENT, IMPORT_DOC_META, IMPORT_DOC_TYPES, type AttachmentDocType, type ImportDocType, type ImportShipmentData } from "../domain/import-docs";
 import { ENTRY_TYPE_META, type EntryType } from "../domain/types";
 
 export const DOCUMENT_TITLES: Record<DocumentKind, string> = {
@@ -53,15 +54,52 @@ const fmt = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFr
 const money = (v: string | null | undefined) => (v === null || v === undefined ? "" : fmt.format(v as unknown as number));
 const qty = (v: string) => (v.includes(".") ? v.replace(/\.?0+$/, "") : v);
 
+/** An attached file of an import document (only the name is printed). */
+export interface ImportFileRef {
+  docType: AttachmentDocType;
+  fileName: string;
+}
+
+/**
+ * GRN (Imported): number, date and key details of each of the five shipment documents, with the
+ * names of the files attached to it. The CI value is a cost: printed only with `showCost`.
+ */
+function shipmentBlock(s: ImportShipmentData | null, files: ImportFileRef[], showCost: boolean): string {
+  const sh = s ?? EMPTY_SHIPMENT;
+  const join = (parts: (string | null | false | undefined)[]) => parts.filter(Boolean).join(" · ");
+  const details: Record<ImportDocType, string> = {
+    BL: join([sh.shippingLine, sh.vesselVoyage, sh.portOfLoading || sh.portOfDischarge ? `${sh.portOfLoading ?? "—"} → ${sh.portOfDischarge ?? "—"}` : null, sh.containerNumbers.length ? `Containers: ${sh.containerNumbers.join(", ")}` : null]),
+    CO: join([sh.countryOfOrigin ? `Origin: ${sh.countryOfOrigin}` : null, sh.coIssuingAuthority]),
+    PL: join([sh.packageCount !== null ? `${sh.packageCount} packages` : null, sh.grossWeightKg ? `gross ${qty(sh.grossWeightKg)} kg` : null, sh.netWeightKg ? `net ${qty(sh.netWeightKg)} kg` : null]),
+    CI: join([sh.incoterm, showCost && sh.ciValue !== null ? `Value ${[sh.ciCurrency, money(sh.ciValue)].filter(Boolean).join(" ")}` : null]),
+    BOE: join([sh.customsStation]),
+  };
+  const dates: Record<ImportDocType, string | null> = { BL: sh.blDate, CO: sh.coDate, PL: sh.plDate, CI: sh.ciDate, BOE: sh.boeDate };
+  const names = (t: AttachmentDocType) => files.filter((f) => f.docType === t).map((f) => esc(f.fileName));
+  const row = (label: string, no: string | null, date: string | null, detail: string, fileNames: string[]) =>
+    `<tr><td>${esc(label)}</td><td class="mono">${esc(no ?? "—")}</td><td>${esc(date ?? "—")}</td><td>${esc(detail || "—")}</td><td>${fileNames.length ? fileNames.join("<br>") : "—"}</td></tr>`;
+  const rows = IMPORT_DOC_TYPES.map((t) => row(`${IMPORT_DOC_META[t].label} (${t === "BOE" ? "B/E" : t})`, sh[IMPORT_DOC_META[t].numberField] as string | null, dates[t], details[t], names(t)));
+  const other = names("OTHER");
+  if (other.length) rows.push(row("Other documents", null, null, "", other));
+  return `<h2 class="section">Shipment documents</h2>
+<table class="lines docs">
+  <thead><tr><th>Document</th><th>No.</th><th>Date</th><th>Details</th><th>Files attached</th></tr></thead>
+  <tbody>${rows.join("")}</tbody>
+</table>`;
+}
+
 /**
  * Printable HTML for an entry. `showCost` follows the requester's seeCost flag; challans
  * never show prices. Amounts are written as "BDT" (the taka sign isn't in every PDF font).
+ * GRN (Imported) also prints a "Shipment documents" block (`importFiles`: its import-document
+ * attachments) and the country of origin per line.
  */
-export function renderDocumentHtml(e: EntryRecord, kind: DocumentKind, opts: { showCost: boolean; companyName: string; printedBy: string; printedAt: string }): string {
+export function renderDocumentHtml(e: EntryRecord, kind: DocumentKind, opts: { showCost: boolean; companyName: string; printedBy: string; printedAt: string; importFiles?: ImportFileRef[] }): string {
   const title = DOCUMENT_TITLES[kind];
   const isChallan = kind === "DELIVERY_CHALLAN" || kind === "TRANSFER_CHALLAN";
   const isSale = kind === "SALES_INVOICE";
   const priced = !isChallan && (isSale || opts.showCost);
+  const isImport = e.type === "GRN_IMPORT";
   const statusNote = ["POSTED", "RECEIVED", "DISPATCHED"].includes(e.status) ? "" : `<div class="watermark">${esc(e.status)}</div>`;
 
   const party = [
@@ -74,7 +112,8 @@ export function renderDocumentHtml(e: EntryRecord, kind: DocumentKind, opts: { s
     ["PO no.", e.poNumberText],
     ["Supplier invoice / challan", e.supplierInvoiceNo],
     ["LC no.", e.lcNo],
-    ["Bill of Entry", e.billOfEntryNo],
+    // GRN (Imported): the B/E is printed in the Shipment documents block instead.
+    ["Bill of Entry", isImport ? null : e.billOfEntryNo],
     ["Challan / ref.", e.challanNo],
     ["Site address", e.siteAddress],
     ["Received by", e.receivedBy],
@@ -89,6 +128,8 @@ export function renderDocumentHtml(e: EntryRecord, kind: DocumentKind, opts: { s
       const amount = isSale ? l.amount : l.costAmount;
       const serials = l.serials.length ? `<div class="serials">S/N: ${l.serials.map((s) => esc(s.serial)).join(", ")}</div>` : "";
       return `<tr><td>${i + 1}</td><td class="mono">${esc(l.product.code)}</td><td>${esc(l.product.name)}${l.condition === "DAMAGED" ? " <b>(damaged)</b>" : ""}${serials}</td><td class="num">${l.adjustDirection === "LOSS" ? "− " : l.adjustDirection === "GAIN" ? "+ " : ""}${qty(l.qty)} ${esc(l.product.unitCode)}</td>${
+        isImport ? `<td>${esc(l.countryOfOrigin ?? e.importShipment?.countryOfOrigin ?? "—")}</td>` : ""
+      }${
         priced ? `<td class="num">${money(unit)}</td><td class="num">${money(amount)}</td>` : ""
       }</tr>`;
     })
@@ -126,6 +167,8 @@ export function renderDocumentHtml(e: EntryRecord, kind: DocumentKind, opts: { s
   table.totals { margin: 12px 0 0 auto; min-width: 260px; border-collapse: collapse; }
   .totals td { padding: 4px 6px; }
   .totals .grand td { border-top: 2px solid #161616; font-weight: 600; }
+  h2.section { font-size: 12px; font-weight: 600; margin: 18px 0 0; }
+  .docs td { font-size: 10px; }
   .notes { margin-top: 14px; white-space: pre-wrap; }
   .sign { display: flex; justify-content: space-between; margin-top: 60px; }
   .sign div { width: 30%; border-top: 1px solid #161616; padding-top: 4px; text-align: center; color: #525252; }
@@ -146,10 +189,11 @@ ${statusNote}
   ${e.reversalOf ? `<div><span>Reverses</span>${esc(e.reversalOf.number)}</div>` : ""}
 </div>
 <table class="lines">
-  <thead><tr><th>#</th><th>Code</th><th>Item</th><th class="num">Qty</th>${priced ? `<th class="num">${priceHead} (BDT)</th><th class="num">Amount (BDT)</th>` : ""}</tr></thead>
+  <thead><tr><th>#</th><th>Code</th><th>Item</th><th class="num">Qty</th>${isImport ? "<th>Origin</th>" : ""}${priced ? `<th class="num">${priceHead} (BDT)</th><th class="num">Amount (BDT)</th>` : ""}</tr></thead>
   <tbody>${rows}</tbody>
 </table>
 ${totals ? `<table class="totals">${totals}</table>` : ""}
+${isImport ? shipmentBlock(e.importShipment, opts.importFiles ?? [], opts.showCost) : ""}
 ${e.description || e.notes ? `<div class="notes">${esc([e.description, e.notes].filter(Boolean).join("\n"))}</div>` : ""}
 <div class="sign"><div>Prepared by<br>${esc(e.createdBy.name)}</div><div>${isChallan ? "Received by" : "Checked by"}${e.verifiedBy ? `<br>${esc(e.verifiedBy.name)}` : ""}</div><div>Authorised signature</div></div>
 <div class="foot"><span>StockBook · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(e.number ?? e.draftRef)}</span></div>

@@ -1,5 +1,7 @@
 "use client";
 
+import { Icon } from "./Icon";
+import { Select } from "./Select";
 import styles from "./Pagination.module.css";
 
 export interface PaginationProps {
@@ -16,16 +18,18 @@ export function Pagination({ page, pageSize, total, pageSizes = [10, 20, 50, 100
   const to = Math.min(total, page * pageSize);
   return (
     <div className={styles.pagination}>
-      <label className={styles.size}>
-        <span>Items per page:</span>
-        <select value={pageSize} onChange={(e) => onChange(1, Number(e.target.value))} className={styles.select}>
-          {pageSizes.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className={styles.size}>
+        <span aria-hidden="true">Items per page:</span>
+        <span className={styles.sizeSelect}>
+          <Select aria-label="Items per page" value={pageSize} onChange={(e) => onChange(1, Number(e.target.value))} className={styles.select}>
+            {pageSizes.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </Select>
+        </span>
+      </div>
       <span className={styles.range}>
         {from}–{to} of {total} items
       </span>
@@ -34,10 +38,10 @@ export function Pagination({ page, pageSize, total, pageSizes = [10, 20, 50, 100
       </span>
       <div className={styles.nav}>
         <button type="button" className={styles.button} onClick={() => onChange(page - 1, pageSize)} disabled={page <= 1} aria-label="Previous page">
-          ‹
+          <Icon name="chevronLeft" size={15} />
         </button>
         <button type="button" className={styles.button} onClick={() => onChange(page + 1, pageSize)} disabled={page >= totalPages} aria-label="Next page">
-          ›
+          <Icon name="chevronRight" size={15} />
         </button>
       </div>
     </div>

@@ -3,12 +3,29 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
+import { Select } from "@/components/ui/Select";
 import { Checkbox, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { Notification } from "@/components/ui/Notification";
 import { api, ApiError, errorMessage } from "@/lib/api-client";
 import { formatMoney } from "@/shared/time/format";
 import type { ReceivableDto, ReceivableSummaryDto } from "../../purchases/_components/types";
 import { ProductPicker } from "./ProductPicker";
+import { ImportDocuments } from "./ImportDocuments";
+import {
+  DEFAULT_REQUIRED,
+  emptyAttachments,
+  IMPORT_WARNING_CODES,
+  localChecklist,
+  missingRequired,
+  missingTitle,
+  removeRule,
+  shipmentBody,
+  toShipmentForm,
+  type DocChecklistItem,
+  type EntryDetailDto,
+  type ImportAttachments,
+  type ImportDocType,
+} from "./import-docs";
 import {
   CHARGE_TYPES,
   ENTRY_TYPE_META,
@@ -36,6 +53,8 @@ interface Line {
   originalLineId: string | null;
   /** Receiving against a PO: the PO line (its price is applied server-side). */
   poLineId: string | null;
+  /** GRN (Imported): country of origin typed by the user; null shows the server default. */
+  origin: string | null;
 }
 
 interface Charge {
@@ -50,10 +69,12 @@ interface Charge {
 interface Calc {
   nextNumber: string;
   postingMode: "POSTED_IMMEDIATELY" | "DISPATCHED_IMMEDIATELY" | "PENDING_VERIFICATION";
-  lines: { available: string; insufficient: boolean; unitPrice?: string; amount?: string; unitCostBdt?: string; landedUnitCost?: string | null; costAmount?: string; belowCost: boolean; avgCostBefore?: string }[];
+  lines: { available: string; insufficient: boolean; unitPrice?: string; amount?: string; unitCostBdt?: string; landedUnitCost?: string | null; costAmount?: string; belowCost: boolean; avgCostBefore?: string; countryOfOrigin?: string | null }[];
   charges: { amountBdt?: string }[];
   totals: Record<string, string | null | undefined>;
-  warnings: { line: number | null; code: string; message: string }[];
+  warnings: { line: number | null; code: string; message: string; link?: { entryId: string; number: string | null; href: string } }[];
+  /** GRN (Imported) only. */
+  documentsChecklist?: DocChecklistItem[];
 }
 
 type Header = Record<string, string>;
@@ -62,7 +83,6 @@ const HEADER_FIELDS = [
   "poNumberText",
   "supplierInvoiceNo",
   "lcNo",
-  "billOfEntryNo",
   "challanNo",
   "siteAddress",
   "receivedBy",
@@ -78,7 +98,7 @@ const CONDITION_TYPES: EntryType[] = ["RETURN_FROM_SITE", "DAMAGE_WRITE_OFF", "R
 const OUT_SERIAL_TYPES: EntryType[] = ["ISSUE_TO_PROJECT", "SALE", "RETURN_TO_SUPPLIER", "DAMAGE_WRITE_OFF", "TRANSFER"];
 
 let lineSeq = 0;
-const emptyLine = (): Line => ({ key: `l${++lineSeq}`, product: null, qty: "", unitPrice: "", condition: "GOOD", serials: "", originalLineId: null, poLineId: null });
+const emptyLine = (): Line => ({ key: `l${++lineSeq}`, product: null, qty: "", unitPrice: "", condition: "GOOD", serials: "", originalLineId: null, poLineId: null, origin: null });
 const GRN_TYPES: EntryType[] = ["GRN_LOCAL", "GRN_IMPORT"];
 const trimZeros = (v: string) => (v.includes(".") ? v.replace(/\.?0+$/, "") : v);
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" }).format(new Date());
@@ -111,6 +131,7 @@ function fromEntry(e: EntryDto): { header: Header; lines: Line[]; charges: Charg
       serials: l.serials.map((s) => s.serial).join("\n"),
       originalLineId: l.originalLineId,
       poLineId: l.purchaseOrderLineId,
+      origin: l.countryOfOrigin ?? null,
     })),
     charges: e.charges.map((c) => ({ key: c.id, type: c.type as Charge["type"], mode: c.mode as Charge["mode"], value: "value" in c && c.value ? String(c.value) : "", includeInCost: c.includeInCost, label: c.label ?? "" })),
   };
@@ -120,8 +141,10 @@ interface Props {
   caps: StockCaps;
   warehouses: WarehouseDto[];
   /** Editing a draft or rejected entry. */
-  entry?: EntryDto;
+  entry?: EntryDetailDto;
   defaultVat: string;
+  /** Inventory setting: import documents needed before posting a GRN (Imported). */
+  requiredDocs?: ImportDocType[];
   /** Receive against this purchase order (from "Receive goods" on the PO: /stock?tab=new&po=…). */
   initialPoId?: string;
   /** Query-param prefill (e.g. "Issue material" on a project: ?type=ISSUE_TO_PROJECT&project=…&warehouse=…). */
@@ -137,7 +160,7 @@ interface ProjectOption {
   defaultWarehouse: { id: string; code: string; name: string } | null;
 }
 
-export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, prefill }: Props) {
+export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, initialPoId, prefill }: Props) {
   const router = useRouter();
   const myWarehouses = warehouses.filter((w) => caps.warehouseIds.includes(w.id) && w.isActive);
   const initial = useMemo(() => (entry ? fromEntry(entry) : null), [entry]);
@@ -170,6 +193,12 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
   const [po, setPo] = useState<ReceivableDto | null>(null);
   const [poOptions, setPoOptions] = useState<ReceivableSummaryDto[]>([]);
   const [poError, setPoError] = useState<string | null>(null);
+  // GRN (Imported) documents. Files need a saved entry: a new form saves a draft on the first upload.
+  const [shipment, setShipment] = useState(() => toShipmentForm(entry?.importShipment, entry?.references.billOfEntryNo));
+  const [importFiles, setImportFiles] = useState<ImportAttachments>(() => entry?.importAttachments ?? emptyAttachments());
+  const [draft, setDraft] = useState<{ id: string; displayNumber: string } | null>(null);
+  const draftSaving = useRef<Promise<string | null> | null>(null);
+  const savedId = entry?.id ?? draft?.id ?? null;
 
   /** Links the GRN to a PO: type, warehouse, supplier and currency follow the PO; lines default to what is still due. */
   const linkPo = useCallback(async (id: string, keepLines = false) => {
@@ -304,21 +333,26 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
           ...(needs.condition ? { condition: l.condition } : {}),
           ...(l.product!.trackSerial ? { serials: parseSerials(l.serials) } : {}),
           ...(l.originalLineId && header.originalEntryId ? { originalLineId: l.originalLineId } : {}),
+          ...(type === "GRN_IMPORT" && l.origin?.trim() ? { countryOfOrigin: l.origin.trim() } : {}),
         })),
       charges: needs.charges ? charges.filter((c) => c.value !== "").map(({ key: _k, label, ...c }) => ({ ...c, label: label || null })) : [],
     };
     for (const f of HEADER_FIELDS) body[f] = header[f]?.trim() ? header[f]!.trim() : null;
-    if (type === "GRN_IMPORT") Object.assign(body, { currency: header.currency, exchangeRate: header.exchangeRate || undefined });
+    if (type === "GRN_IMPORT") Object.assign(body, { currency: header.currency, exchangeRate: header.exchangeRate || undefined, importShipment: shipmentBody(shipment, caps.seeCost) });
     if (type === "SALE") Object.assign(body, { discountAmount: header.discountAmount || "0", vatPercent: header.vatPercent || undefined });
     return body;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, header, lines, charges, po]);
+  }, [type, header, lines, charges, po, shipment]);
+
+  // Uploaded import files change the server's checklist: recalculate when their count changes.
+  const importFileCount = Object.values(importFiles).reduce((n, l) => n + l.length, 0);
 
   // Live calculation (debounced): totals, costs, availability, warnings.
   useEffect(() => {
     const body = payload();
     if (!body.warehouseId || !(body.lines as unknown[]).length) return setCalc(null);
     if (type === "GRN_IMPORT" && !header.exchangeRate) return setCalc(null);
+    if (savedId) body.entryId = savedId;
     const t = setTimeout(() => {
       api<{ data: Calc }>("/stock-entries/calculate", { method: "POST", body })
         .then((r) => {
@@ -331,7 +365,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
         });
     }, 350);
     return () => clearTimeout(t);
-  }, [payload, type, header.exchangeRate]);
+  }, [payload, type, header.exchangeRate, savedId, importFileCount]);
 
   const updateLine = (key: string, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
@@ -342,10 +376,10 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
     const body = payload();
     try {
       let saved: EntryDto;
-      if (entry) {
-        saved = (await api<{ data: EntryDto }>(`/stock-entries/${entry.id}`, { method: "PATCH", body })).data;
+      if (savedId) {
+        saved = (await api<{ data: EntryDto }>(`/stock-entries/${savedId}`, { method: "PATCH", body })).data;
         if (action !== "draft") {
-          saved = (await api<{ data: EntryDto }>(`/stock-entries/${entry.id}/${action}`, { method: "POST", body: confirmBelowCost ? { confirmBelowCost: true } : {}, headers: { "Idempotency-Key": keyRef.current } })).data;
+          saved = (await api<{ data: EntryDto }>(`/stock-entries/${savedId}/${action}`, { method: "POST", body: confirmBelowCost ? { confirmBelowCost: true } : {}, headers: { "Idempotency-Key": keyRef.current } })).data;
         }
       } else {
         saved = (await api<{ data: EntryDto }>("/stock-entries", { method: "POST", body: { action, ...body, ...(confirmBelowCost ? { confirmBelowCost: true } : {}) }, headers: { "Idempotency-Key": keyRef.current } })).data;
@@ -356,12 +390,39 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
       keyRef.current = newKey(); // the request failed: the next attempt is a new action
       if (err instanceof ApiError) {
         setErrors(err.fieldErrors());
-        setFormError(err.message);
+        const docs = err.details.filter((d) => d.code === "IMPORT_DOCS_MISSING");
+        setFormError(docs.length ? `Import documents are missing. Needed before posting: ${docs.map((d) => d.message).join("; ")}.` : err.message);
       } else setFormError(errorMessage(err));
       window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
       setSaving(null);
     }
+  }
+
+  /**
+   * Import files need a saved entry: the first upload on a new form saves it as a draft (once,
+   * even when several documents upload at the same time) and keeps editing that draft.
+   */
+  function ensureEntryId(): Promise<string | null> {
+    if (savedId) return Promise.resolve(savedId);
+    draftSaving.current ??= (async () => {
+      setErrors({});
+      setFormError(null);
+      try {
+        const saved = (await api<{ data: EntryDto }>("/stock-entries", { method: "POST", body: { action: "draft", ...payload() }, headers: { "Idempotency-Key": newKey() } })).data;
+        setDraft({ id: saved.id, displayNumber: saved.displayNumber });
+        // A reload reopens this draft instead of an empty form.
+        window.history.replaceState(null, "", `/stock/${saved.id}/edit`);
+        return saved.id;
+      } catch (err) {
+        if (err instanceof ApiError) setErrors(err.fieldErrors());
+        setFormError(`Files are attached to a saved draft, and the draft couldn't be saved: ${errorMessage(err)}`);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        draftSaving.current = null; // let the next upload try again
+        return null;
+      }
+    })();
+    return draftSaving.current;
   }
 
   const belowCost = calc?.warnings.some((w) => w.code === "BELOW_COST") ?? false;
@@ -370,6 +431,13 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
   const poLine = (l: Line) => (po ? po.lines.find((x) => (l.poLineId ? x.purchaseOrderLineId === l.poLineId : x.product.id === l.product?.id)) : undefined);
   const postLabel = calc?.postingMode === "DISPATCHED_IMMEDIATELY" ? "Dispatch" : "Post";
   const canPostDirect = caps.canFull && calc?.postingMode !== "PENDING_VERIFICATION";
+  // GRN (Imported): checklist from what is on screen; the required set comes from the server.
+  const required = calc?.documentsChecklist?.filter((c) => c.required).map((c) => c.docType) ?? requiredDocs ?? DEFAULT_REQUIRED;
+  const docsMissing = type === "GRN_IMPORT" ? missingRequired(localChecklist(shipment, importFiles, required)) : [];
+  const importWarnings = type === "GRN_IMPORT" ? (calc?.warnings.filter((w) => IMPORT_WARNING_CODES.includes(w.code)) ?? []) : [];
+  const otherWarnings = calc?.warnings.filter((w) => !IMPORT_WARNING_CODES.includes(w.code)) ?? [];
+  const shipmentErrors = Object.fromEntries(Object.entries(errors).flatMap(([k, v]) => (k.startsWith("importShipment.") ? [[k.slice("importShipment.".length), v]] : [])));
+  const lockedType = entry?.type ?? (draft ? type : null);
   const priceLabel = meta.price === "COST_FOREIGN" ? `Unit price (${header.currency || "foreign"})` : meta.price === "SELLING" ? "Selling price (৳)" : "Unit cost (৳)";
   const t = calc?.totals ?? {};
 
@@ -437,7 +505,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
                       type="button"
                       role="radio"
                       aria-checked={type === tp}
-                      disabled={(!!entry && entry.type !== tp) || (!!po && type !== tp)}
+                      disabled={(!!lockedType && lockedType !== tp) || (!!po && type !== tp)}
                       className={`${styles.typeOption} ${type === tp ? styles.typeSelected : ""}`}
                       onClick={() => {
                         setType(tp);
@@ -600,7 +668,6 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
                 helper={po ? (caps.seeCost ? "From the PO; change it to the customs rate if known." : "From the PO. The verifier sets the customs rate.") : undefined}
               />
               <TextField label="LC number" value={header.lcNo ?? ""} onChange={(e) => set("lcNo", e.target.value)} />
-              <TextField label="Bill of entry no." value={header.billOfEntryNo ?? ""} onChange={(e) => set("billOfEntryNo", e.target.value)} />
             </>
           ) : null}
           {["GRN_IMPORT", "GRN_LOCAL"].includes(type) ? (
@@ -648,6 +715,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
                 <th className={styles.right}>Qty</th>
                 {needs.price ? <th className={styles.right}>{priceLabel}</th> : null}
                 {needs.condition ? <th>Condition</th> : null}
+                {type === "GRN_IMPORT" ? <th>Origin</th> : null}
                 {caps.seeCost || type === "SALE" ? <th className={styles.right}>{type === "SALE" ? "Amount" : "Cost"}</th> : null}
                 <th>
                   <span className="visually-hidden">Remove</span>
@@ -748,10 +816,22 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
                     ) : null}
                     {needs.condition ? (
                       <td>
-                        <select className={styles.cellInput} aria-label={`Condition, line ${i + 1}`} value={l.condition} onChange={(e) => updateLine(l.key, { condition: e.target.value as Line["condition"], serials: "" })}>
+                        <Select className={styles.cellInput} aria-label={`Condition, line ${i + 1}`} value={l.condition} onChange={(e) => updateLine(l.key, { condition: e.target.value as Line["condition"], serials: "" })}>
                           <option value="GOOD">Good</option>
                           <option value="DAMAGED">Damaged</option>
-                        </select>
+                        </Select>
+                      </td>
+                    ) : null}
+                    {type === "GRN_IMPORT" ? (
+                      <td style={{ minWidth: 120 }}>
+                        {/* Shows the server default (product, else the CO's country) until the user types one. */}
+                        <input
+                          className={styles.cellInput}
+                          aria-label={`Country of origin, line ${i + 1}`}
+                          value={l.origin ?? lc?.countryOfOrigin ?? ""}
+                          placeholder={lc?.countryOfOrigin ?? "Country"}
+                          onChange={(e) => updateLine(l.key, { origin: e.target.value })}
+                        />
                       </td>
                     ) : null}
                     {caps.seeCost || type === "SALE" ? (
@@ -809,20 +889,20 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
                     return (
                       <tr key={c.key}>
                         <td>
-                          <select className={styles.cellInput} aria-label={`Charge type ${i + 1}`} value={c.type} onChange={(e) => upd({ type: e.target.value as Charge["type"], includeInCost: !["IMPORT_VAT", "AIT"].includes(e.target.value) })}>
+                          <Select className={styles.cellInput} aria-label={`Charge type ${i + 1}`} value={c.type} onChange={(e) => upd({ type: e.target.value as Charge["type"], includeInCost: !["IMPORT_VAT", "AIT"].includes(e.target.value) })}>
                             {CHARGE_TYPES.map(([v, label]) => (
                               <option key={v} value={v}>
                                 {label}
                               </option>
                             ))}
-                          </select>
+                          </Select>
                           {c.type === "OTHER" ? <input className={styles.cellInput} style={{ marginTop: "var(--space-2)" }} aria-label="Charge label" placeholder="Label" value={c.label} onChange={(e) => upd({ label: e.target.value })} /> : null}
                         </td>
                         <td>
-                          <select className={styles.cellInput} aria-label={`Charge basis ${i + 1}`} value={c.mode} onChange={(e) => upd({ mode: e.target.value as Charge["mode"] })}>
+                          <Select className={styles.cellInput} aria-label={`Charge basis ${i + 1}`} value={c.mode} onChange={(e) => upd({ mode: e.target.value as Charge["mode"] })}>
                             <option value="PERCENT_OF_GOODS">% of goods</option>
                             <option value="AMOUNT_BDT">Amount ৳</option>
-                          </select>
+                          </Select>
                         </td>
                         <td className={styles.right}>
                           <input className={styles.cellInput} inputMode="decimal" aria-label={`Charge value ${i + 1}`} value={c.value} onChange={(e) => upd({ value: e.target.value })} />
@@ -848,6 +928,24 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
         </section>
       ) : null}
 
+      {type === "GRN_IMPORT" ? (
+        <ImportDocuments
+          shipment={shipment}
+          onChange={setShipment}
+          files={importFiles}
+          onFilesChange={(docType, update) => setImportFiles((f) => ({ ...f, [docType]: update(f[docType]) }))}
+          required={required}
+          seeCost={caps.seeCost}
+          entryId={savedId}
+          ensureEntryId={ensureEntryId}
+          canUpload={entry ? entry.actions.editImportDocs : caps.canCreate}
+          removeRule={(a) => removeRule(caps, { status: entry?.status ?? "DRAFT", warehouseId: entry?.warehouse.id ?? header.warehouseId ?? "" }, a)}
+          warnings={importWarnings}
+          errors={shipmentErrors}
+          onError={(message) => setFormError(message)}
+        />
+      ) : null}
+
       <section className={styles.section} aria-labelledby="entry-summary">
         <h2 id="entry-summary" className={styles.sectionTitle} style={{ marginBottom: "var(--space-5)" }}>
           Summary
@@ -855,10 +953,10 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
         <div className={styles.summary}>
           <div className={styles.stack}>
             {calcError ? <Notification kind="error">{calcError}</Notification> : null}
-            {calc?.warnings.length ? (
+            {otherWarnings.length ? (
               <Notification kind="warning" title="Check before saving">
                 <ul style={{ margin: 0, paddingLeft: "var(--space-5)" }}>
-                  {calc.warnings.map((w, i) => (
+                  {otherWarnings.map((w, i) => (
                     <li key={i}>{w.message}</li>
                   ))}
                 </ul>
@@ -929,7 +1027,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
       </section>
 
       <div className={styles.footer}>
-        <span className={styles.muted}>{entry ? `Editing ${entry.displayNumber}` : "New entry"}</span>
+        <span className={styles.muted}>{entry ? `Editing ${entry.displayNumber}` : draft ? `Editing draft ${draft.displayNumber}` : "New entry"}</span>
         <div className={styles.footerActions}>
           <Button kind="ghost" onClick={() => router.back()} disabled={!!saving}>
             Cancel
@@ -944,9 +1042,12 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, initialPoId, pr
                   {saving === "submit" ? "Submitting…" : "Submit for verification"}
                 </Button>
               ) : null}
-              <Button onClick={() => save("post")} disabled={!!saving || blocking || (belowCost && !confirmBelowCost)}>
-                {saving === "post" ? `${postLabel}ing…` : postLabel}
-              </Button>
+              {/* The wrapper carries the tooltip: disabled buttons don't get hover events everywhere. */}
+              <span title={missingTitle(docsMissing)}>
+                <Button onClick={() => save("post")} disabled={!!saving || blocking || (belowCost && !confirmBelowCost) || docsMissing.length > 0}>
+                  {saving === "post" ? `${postLabel}ing…` : postLabel}
+                </Button>
+              </span>
             </>
           ) : (
             <Button onClick={() => save("submit")} disabled={!!saving || blocking || (belowCost && !caps.canFull)}>

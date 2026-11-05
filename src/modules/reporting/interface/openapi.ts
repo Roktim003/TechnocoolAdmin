@@ -8,7 +8,7 @@ const body = (schema: z.ZodTypeAny) => ({ body: { required: true, content: { "ap
 
 const VIEW = "Requires `reports` ≥ VIEW (Admin and Accounts by default; Manager and Store Manager get 403).";
 const FLAGS =
-  "Columns, totals and charts the caller's role may not see are absent (cost → `seeCost`, profit → `seeProfit`, contract / margin → `seeMargin`), in JSON, Excel and PDF alike. Rows are limited to the caller's warehouses; a `warehouseId` outside them is 403.";
+  "Columns, totals and charts the caller's role may not see are absent (cost → `seeCost`, profit → `seeProfit`, contract / margin → `seeMargin`, overheads → `overheads` ≥ VIEW + `seeCost`), in JSON, Excel and PDF alike. Reports 16–17 (overheads) need overhead access as a whole (403 otherwise; not listed in the catalog). Without overhead access, project cost and margin are on direct cost; with it, margin is on full cost (direct + overheads). Audit log rows about overheads are hidden without overhead access. Rows are limited to the caller's warehouses; a `warehouseId` outside them is 403.";
 const SCHEDULE = "Requires `reports` ≥ VIEW: VIEW manages its own schedules, FULL everyone's. External email addresses need FULL.";
 
 function path(tag: "Reports" | "Report schedules" | "Dashboard", method: "get" | "post" | "patch" | "delete", p: string, summary: string, description: string, extra: Record<string, unknown>) {
@@ -16,8 +16,10 @@ function path(tag: "Reports" | "Report schedules" | "Dashboard", method: "get" |
 }
 
 const ReportIdParams = z.object({ id: z.enum(REPORTS.map((r) => r.meta.id) as [string, ...string[]]) });
-const Column = z.object({ key: z.string(), label: z.string(), type: z.enum(["text", "number", "money", "date", "tag"]), align: z.enum(["start", "end"]), requires: z.string(), sortKey: z.string().optional() }).passthrough();
-const Total = z.object({ key: z.string(), label: z.string(), type: z.enum(["number", "money"]), requires: z.string() }).passthrough();
+/** A flag (`none`, `seeCost`, `seeProfit`, `seeMargin`, `overheads`) or a list of flags that must all be met. */
+const Requires = z.union([z.string(), z.array(z.string())]);
+const Column = z.object({ key: z.string(), label: z.string(), type: z.enum(["text", "number", "money", "date", "tag"]), align: z.enum(["start", "end"]), requires: Requires, sortKey: z.string().optional() }).passthrough();
+const Total = z.object({ key: z.string(), label: z.string(), type: z.enum(["number", "money"]), requires: Requires }).passthrough();
 const Chart = z.object({ type: z.enum(["bar", "hbar", "line", "stacked", "donut"]), title: z.string(), valueType: z.enum(["money", "number"]), series: z.array(z.string()).optional(), points: z.array(z.object({ label: z.string(), values: z.array(z.union([z.string(), z.number()])) })) }).nullable();
 
 const ReportInfo = registry.register(
@@ -102,10 +104,10 @@ const Widget = registry.register(
 
 /* reports */
 
-path("Reports", "get", "/reports", "The reports catalog", `${VIEW} Lists the 14 reports with their filters and the columns / totals / chart this caller gets. ${FLAGS}`, {
+path("Reports", "get", "/reports", "The reports catalog", `${VIEW} Lists the reports this caller may run (15, or all 17 with overhead access) with their filters and the columns / totals / chart this caller gets. ${FLAGS}`, {
   responses: { 200: json(z.object({ data: z.array(ReportInfo), scheduleCount: z.number().int() })), ...errors(401, 403) },
 });
-path("Reports", "get", "/reports/{id}/run", "Run a report (one page)", `${VIEW} Filters are query parameters (see \`params\`; dates accept YYYY-MM-DD or tokens such as \`monthStart\`, \`today\`, \`-30d\`). Aggregation and paging happen in the database; queries stop after 30 s (503 QUERY_TIMEOUT). ${FLAGS}`, {
+path("Reports", "get", "/reports/{id}/run", "Run a report (one page)", `${VIEW} Filters are query parameters (see \`params\`; dates accept YYYY-MM-DD or tokens such as \`monthStart\`, \`today\`, \`-30d\`; months accept YYYY-MM or tokens such as \`thisMonth\`, \`lastMonth\`, \`-5m\`, \`fiscalYearStart\`). Aggregation and paging happen in the database; queries stop after 30 s (503 QUERY_TIMEOUT). ${FLAGS}`, {
   request: { params: ReportIdParams, query: z.object({ page: z.number().int().optional(), pageSize: z.number().int().max(200).optional(), sort: z.string().optional() }).passthrough() },
   responses: {
     200: json(z.object({ data: z.array(z.record(z.unknown())), meta: PageMetaSchema, totals: z.record(z.union([z.string(), z.number(), z.null()])), chart: Chart, report: z.object({}).passthrough(), params: z.record(z.string()) })),
@@ -163,6 +165,6 @@ path("Report schedules", "get", "/report-schedules/{id}/runs/{runId}/files/{inde
 
 /* dashboard */
 
-path("Dashboard", "get", "/dashboard", "The role-aware dashboard", "Requires `dashboard` ≥ VIEW. Widgets the caller may not see are omitted (money only with `seeCost`; project contract vs cost only with `seeMargin`). Shared widgets are cached for 60 s per role, flags and warehouse scope and cleared when stock, purchasing or project data change.", {
+path("Dashboard", "get", "/dashboard", "The role-aware dashboard", "Requires `dashboard` ≥ VIEW. Widgets the caller may not see are omitted (money only with `seeCost`; project contract vs cost only with `seeMargin`, on full cost with overhead access and on direct cost without; the KPIs `overheadsThisMonth` and `overheadsNotCharged` only with overhead access, i.e. `overheads` ≥ VIEW + `seeCost`). Shared widgets are cached for 60 s per role, flags (incl. overhead access) and warehouse scope and cleared when stock, purchasing, project or overhead data change.", {
   responses: { 200: json(z.object({ data: z.array(Widget), cached: z.boolean(), generatedAt: z.string() })), ...errors(401, 403) },
 });

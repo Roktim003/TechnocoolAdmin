@@ -95,4 +95,12 @@ export async function setProjectStatus(_token: string, code: string, status: "PL
   await prisma.project.update({ where: { code }, data: { status } });
 }
 
+/**
+ * Turns off "import documents required before posting" (default CI + BOE), for tests about
+ * something else that post GRN (Imported) entries without document files.
+ */
+export async function noImportDocsRequired() {
+  await prisma.inventorySettings.upsert({ where: { id: 1 }, create: { id: 1, importDocsRequiredToPost: [] }, update: { importDocsRequiredToPost: [] } });
+}
+
 export { prisma, roleId };

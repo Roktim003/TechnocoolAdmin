@@ -119,7 +119,7 @@ export function ProjectBrowser({ caps }: { caps: ProjectsCaps }) {
                 <div className={styles.figures}>
                   <Figure label="Material" value={p.summary.netMaterialCost} />
                   <Figure label="Other costs" value={sumOther(p)} />
-                  <Figure label="Total cost" value={p.summary.totalCost} />
+                  {p.summary.fullCost !== undefined ? <Figure label="Full cost" value={p.summary.fullCost} note="incl. overheads" /> : <Figure label="Total cost" value={p.summary.totalCost} />}
                 </div>
               ) : null}
               <MarginStrip p={p} />
@@ -142,11 +142,12 @@ function sumOther(p: ProjectDto) {
   return (cents / 100).toFixed(2);
 }
 
-function Figure({ label, value }: { label: string; value: string | undefined }) {
+function Figure({ label, value, note }: { label: string; value: string | undefined; note?: string }) {
   return (
     <div>
       <div className={styles.figLabel}>{label}</div>
       <div className={styles.figValue}>{formatMoney(value)}</div>
+      {note ? <div className={styles.figNote}>{note}</div> : null}
     </div>
   );
 }

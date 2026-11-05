@@ -10,6 +10,7 @@ export interface ApiErrorDetail {
   path?: string;
   message: string;
   code?: string;
+  meta?: Record<string, string>;
 }
 
 export class ApiError extends Error {
@@ -127,6 +128,48 @@ export async function upload<T = unknown>(path: string, body: FormData): Promise
     throw new ApiError(res.status, e?.code ?? "INTERNAL_ERROR", e?.message ?? `Upload failed (${res.status}).`, e?.details ?? [], e?.requestId);
   }
   return json as T;
+}
+
+/**
+ * Multipart upload with progress (XMLHttpRequest: fetch has no upload progress). Same cookie auth
+ * and refresh-and-retry as `upload`. `onProgress` gets 0…1.
+ */
+export async function uploadWithProgress<T = unknown>(path: string, body: FormData, onProgress?: (fraction: number) => void): Promise<T> {
+  const send = () =>
+    new Promise<{ status: number; json: unknown }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `/api/v1${path}`);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader("Accept", "application/json");
+      xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
+      xhr.onload = () => {
+        let json: unknown = null;
+        try {
+          json = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+        } catch {
+          json = null;
+        }
+        resolve({ status: xhr.status, json });
+      };
+      xhr.onerror = () => reject(new ApiError(0, "NETWORK_ERROR", "The upload failed. Check your connection and try again."));
+      xhr.onabort = () => reject(new ApiError(0, "ABORTED", "The upload was cancelled."));
+      xhr.send(body);
+    });
+  let res = await send();
+  if (res.status === 401 && (await refreshSession())) {
+    onProgress?.(0);
+    res = await send();
+  }
+  if (res.status === 401) {
+    toLogin();
+    throw new ApiError(401, "UNAUTHENTICATED", "Your session has ended. Please log in again.");
+  }
+  if (res.status < 200 || res.status >= 300) {
+    const e = (res.json as { error?: { code?: string; message?: string; details?: ApiErrorDetail[]; requestId?: string } } | null)?.error;
+    throw new ApiError(res.status, e?.code ?? "INTERNAL_ERROR", e?.message ?? `Upload failed (${res.status}).`, e?.details ?? [], e?.requestId);
+  }
+  onProgress?.(1);
+  return res.json as T;
 }
 
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : "Something went wrong.");

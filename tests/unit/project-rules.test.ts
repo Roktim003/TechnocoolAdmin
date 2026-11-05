@@ -14,7 +14,7 @@ describe("project costing rules", () => {
   });
 
   it("totals, margin and percentages (decimal, 2 dp)", () => {
-    expect(summarize(material, { LABOUR: "100.00", TRANSPORT: "50.00", OTHER: "16.67" }, "3000.00")).toEqual({
+    expect(summarize(material, { ...zeroCosts(), LABOUR: "100.00", TRANSPORT: "50.00", OTHER: "16.67" }, "3000.00")).toMatchObject({
       issuedCost: "1333.33",
       returnedCost: "250.00",
       netMaterialCost: "1083.33",

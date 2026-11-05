@@ -5,7 +5,7 @@ import { logger } from "@/shared/logger/logger";
  * readers that cache derived data (the dashboard) subscribe in `wireModules()`. Publishers never
  * know who listens, so no module depends on the reporting module.
  */
-export type ChangeTopic = "stock" | "purchasing" | "projects";
+export type ChangeTopic = "stock" | "purchasing" | "projects" | "overheads";
 
 type Listener = (topic: ChangeTopic) => void | Promise<void>;
 

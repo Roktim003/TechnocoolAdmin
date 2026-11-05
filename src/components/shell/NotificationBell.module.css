@@ -7,50 +7,58 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: var(--shell-header-height);
+  width: var(--h-md);
+  height: var(--h-md);
   border: none;
+  border-radius: var(--r-sm);
   background: transparent;
-  color: var(--shell-header-text);
+  color: var(--text-2);
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
 }
 
-.bell:hover {
-  background: var(--shell-header-hover);
-}
-
-.bell:focus-visible {
-  outline: 2px solid var(--shell-header-text);
-  outline-offset: -2px;
+.bell:hover,
+.bell[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .badge {
   position: absolute;
-  top: 8px;
-  right: 6px;
-  min-width: 16px;
-  height: 16px;
+  top: 2px;
+  right: 1px;
+  min-width: 15px;
+  height: 15px;
   padding: 0 4px;
-  border-radius: var(--radius-pill);
-  background: var(--color-error);
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: var(--weight-semibold);
-  line-height: 16px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 0 0 2px var(--surface);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 15px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .panel {
   position: absolute;
   z-index: 50;
-  top: 100%;
+  top: calc(100% + 6px);
   right: 0;
   width: min(380px, calc(100vw - 16px));
   max-height: 70vh;
   display: flex;
   flex-direction: column;
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-  box-shadow: 0 2px 6px rgb(0 0 0 / 30%);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  transform-origin: top right;
+  animation: popIn 160ms var(--ease);
 }
 
 .head,
@@ -58,28 +66,46 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--color-border);
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.head strong {
+  font-size: var(--fs);
+  font-weight: 600;
 }
 
 .foot {
-  border-top: 1px solid var(--color-border);
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
   border-bottom: none;
-  font-size: var(--text-sm);
+  background: var(--sunken);
+  font-size: var(--fs-sm);
+}
+
+.foot a {
+  color: var(--text-2);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.foot a:hover {
+  color: var(--text);
 }
 
 .link {
   padding: 0;
   border: none;
   background: none;
-  color: var(--color-primary);
+  color: var(--accent);
   font: inherit;
-  font-size: var(--text-sm);
+  font-size: var(--fs-sm);
+  font-weight: 500;
   cursor: pointer;
 }
 
 .link:disabled {
-  color: var(--color-text-disabled);
+  color: var(--text-4);
   cursor: default;
 }
 
@@ -90,49 +116,70 @@
   list-style: none;
 }
 
+.list li + li .item {
+  border-top: 1px solid var(--divider);
+}
+
 .item {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
   width: 100%;
-  padding: var(--space-4) var(--space-5);
+  padding: 11px 14px 11px 24px;
   border: none;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-text-primary);
+  background: var(--surface);
+  color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background var(--dur);
 }
 
 .item:hover {
-  background: var(--color-layer-hover);
+  background: var(--surface-2);
 }
 
 .unread {
-  box-shadow: inset 3px 0 0 var(--color-primary);
+  background: color-mix(in srgb, var(--accent) 3.5%, var(--surface));
+}
+
+.unread::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 17px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 .unread .title {
-  font-weight: var(--weight-semibold);
+  font-weight: 600;
 }
 
 .title {
-  font-size: var(--text-md);
+  font-size: var(--fs);
+  font-weight: 450;
 }
 
 .body {
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
 }
 
 .time {
-  color: var(--color-text-placeholder);
-  font-size: var(--text-xs);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
 }
 
 .empty {
-  padding: var(--space-6) var(--space-5);
-  color: var(--color-text-secondary);
+  padding: var(--s-8) var(--s-4);
+  color: var(--text-3);
   text-align: center;
+}
+
+.skeleton {
+  padding: 12px 14px;
 }

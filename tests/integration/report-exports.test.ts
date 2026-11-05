@@ -133,8 +133,11 @@ describe("Excel export", () => {
     expect(sales).toContain("Margin %"); // the sale's profit %, covered by seeProfit
     const projects = await workbook((await exportFile("project-cost-summary", "xlsx", {}, t)).bytes);
     const head = headerRow(projects.worksheets[0]!);
-    expect(head).toContain("Total cost");
+    // Accounts has overhead access: direct cost plus full cost (incl. overheads), as on the project screen.
+    expect(head).toContain("Direct cost");
+    expect(head).toContain("Full cost");
     expect(head).not.toContain("Margin");
+    expect(head).not.toContain("Direct margin");
     expect(head).not.toContain("Contract value");
     expect(JSON.stringify(projects.worksheets[0]!.getSheetValues())).not.toMatch(/16500000/);
   });
@@ -146,8 +149,10 @@ describe("PDF export", () => {
     const sales = await pdfHtml(accounts.id, "sales");
     expect(sales).toContain(">Profit<");
     const projects = await pdfHtml(accounts.id, "project-cost-summary");
-    expect(projects).toContain(">Total cost<");
+    expect(projects).toContain(">Direct cost<"); // with overhead access (Accounts): direct + full cost
+    expect(projects).toContain(">Full cost<");
     expect(projects).not.toContain(">Margin<");
+    expect(projects).not.toContain(">Direct margin<");
     expect(projects).not.toContain("Contract value");
     expect(projects).not.toMatch(/1,65,00,000|16500000/);
     const admin = await prisma.user.findFirstOrThrow({ where: { username: "admin" } });

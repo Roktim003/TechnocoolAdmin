@@ -1,0 +1,173 @@
+/* Gr8r Studio skeletons: soft warm-gray blocks with a slow shimmer that copy the real layout. */
+.sk {
+  display: block;
+  border-radius: var(--r-xs);
+  background: linear-gradient(90deg, var(--surface-3) 0%, var(--surface-2) 40%, var(--surface-3) 80%) 0 0 / 300% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk {
+    animation: none;
+    background: var(--surface-3);
+  }
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s-3);
+  margin-bottom: 4px;
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--s-5);
+  height: 36px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--s-2);
+  padding: var(--s-3) 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.thead {
+  display: flex;
+  gap: var(--s-6);
+  height: 34px;
+  align-items: center;
+  padding: 0 14px;
+  background: var(--sunken);
+  border-bottom: 1px solid var(--border);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-6);
+  height: var(--row-h);
+  padding: 0 14px;
+}
+
+.row + .row {
+  border-top: 1px solid var(--divider);
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(144px, 1fr));
+  gap: var(--s-3);
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--s-3);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+.chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: 12px 14px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 180px;
+  padding-top: var(--s-2);
+  border-bottom: 1px solid var(--divider);
+}
+
+.bars > .sk {
+  flex: 1;
+  border-radius: 4px 4px 0 0;
+}
+
+.lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: var(--s-1) 0;
+}
+
+/* Table body skeleton rows inside DataTable */
+.cell {
+  height: var(--row-h);
+}
+
+@media (max-width: 899px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

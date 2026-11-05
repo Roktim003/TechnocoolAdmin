@@ -1,0 +1,107 @@
+/* Warehouse-costs pieces only; sections, toolbars and line tables reuse stock.module.css. */
+
+.voided {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  white-space: nowrap;
+}
+
+/* Totals line under the register table (all pages of the filter, voided excluded). */
+.totalBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  min-height: 40px;
+  padding: 0 14px;
+  border-top: 1px solid var(--border);
+  background: var(--sunken);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.totalBar strong {
+  color: var(--text);
+  font-size: var(--fs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.check {
+  align-self: flex-end;
+  min-height: var(--h-md);
+  display: flex;
+  align-items: center;
+}
+
+/* Monthly summary */
+tr.monthRow th {
+  padding-top: var(--s-3);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+tr.total td {
+  font-weight: 600;
+  background: var(--sunken);
+  border-top: 1px solid var(--border-strong);
+}
+
+tr.grand td {
+  font-weight: 600;
+  background: var(--accent-soft);
+  border-top: 1px solid var(--accent-line);
+}
+
+.indent {
+  padding-left: var(--s-5) !important;
+}
+
+.summaryBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s-3);
+}
+
+.month {
+  flex: 0 1 170px;
+}
+
+.summaryActions {
+  margin-left: auto;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+
+.formGrid > .full {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 560px) {
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fileLabel {
+  display: block;
+  margin-bottom: var(--s-1);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}

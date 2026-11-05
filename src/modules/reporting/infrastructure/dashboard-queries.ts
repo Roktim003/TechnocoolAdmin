@@ -1,11 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import { ENTRY_TYPE_META, type EntryType } from "@/modules/inventory/domain/types";
+import { DIRECT_COST_CATEGORIES, OVERHEAD_CATEGORIES } from "@/modules/projects/domain/types";
 import { OPEN } from "@/modules/purchasing/domain/types";
 import { deleteKeys, redis } from "@/shared/redis/redis";
 import { logger } from "@/shared/logger/logger";
 import { hasLevel } from "@/shared/rbac/levels";
 import type { DashboardQueries } from "../application/dashboard.service";
 import type { DashboardCache } from "../application/ports";
+import { overheadCharged, overheadSpent } from "./reports/overheads";
 import { dhakaDay, int, isoDate, readOnly, sql, uuidArray, zeroMoney, zeroQty } from "./sql";
 
 type D = Prisma.Decimal;
@@ -93,8 +95,10 @@ export const dashboardQueries: DashboardQueries = {
       return rows.map((r) => ({ label: r.code, value: zeroQty(r.v) }));
     }),
 
-  projectCostVsContract: (ids) =>
+  projectCostVsContract: (ids, withOverheads) =>
     readOnly(async (db) => {
+      // Direct cost = material + labour + transport + other; full cost adds the overhead lines.
+      const categories = withOverheads ? [...DIRECT_COST_CATEGORIES, ...OVERHEAD_CATEGORIES] : [...DIRECT_COST_CATEGORIES];
       const rows = await db.$queryRaw<{ code: string; cost: D; contract: D }[]>`
         WITH mat AS (
           SELECT COALESCE(o."projectId", e."projectId") AS pid, -SUM(m."valueChange") AS cost
@@ -102,12 +106,20 @@ export const dashboardQueries: DashboardQueries = {
           LEFT JOIN "StockEntry" o ON o.id = e."reversalOfId" AND e.type = 'REVERSAL'
           WHERE COALESCE(o.type, e.type) IN ('ISSUE_TO_PROJECT', 'RETURN_FROM_SITE') AND m."warehouseId" = ANY(${uuidArray(ids)})
           GROUP BY 1
-        ), oc AS (SELECT "projectId" AS pid, SUM(amount) AS cost FROM "ProjectCost" WHERE "voidedAt" IS NULL GROUP BY 1)
+        ), oc AS (SELECT "projectId" AS pid, SUM(amount) AS cost FROM "ProjectCost" WHERE "voidedAt" IS NULL AND category::text = ANY(${categories}) GROUP BY 1)
         SELECT pr.code, COALESCE(mat.cost, 0) + COALESCE(oc.cost, 0) AS cost, pr."contractValue" AS contract
         FROM "Project" pr LEFT JOIN mat ON mat.pid = pr.id LEFT JOIN oc ON oc.pid = pr.id
         WHERE pr.status IN ('RUNNING', 'ON_HOLD') AND pr."contractValue" > 0
         ORDER BY pr."contractValue" DESC, pr.code LIMIT 8`;
       return rows.map((r) => ({ label: r.code, cost: zeroMoney(r.cost), contract: zeroMoney(r.contract) }));
+    }),
+
+  overheadsMonth: (ids, month) =>
+    readOnly(async (db) => {
+      const [r] = await db.$queryRaw<{ spent: D | null; charged: D | null }[]>`
+        SELECT (SELECT SUM(amount) FROM (${overheadSpent(ids, month, month)}) s) AS spent,
+               (SELECT SUM(amount) FROM (${overheadCharged(month, month)}) c) AS charged`;
+      return { spent: zeroMoney(r?.spent), charged: zeroMoney(r?.charged) };
     }),
 
   recentActivity: (ids, limit) =>

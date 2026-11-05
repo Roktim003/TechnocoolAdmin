@@ -11,11 +11,19 @@ import type { ReportService } from "./report.service";
 
 const isFull = (v: ReportViewer) => hasLevel(v.permissions.reports, "FULL");
 const canReport = (v: ReportViewer) => hasLevel(v.permissions.reports, "VIEW");
-const audienceKey = (a: FileAudience) => `${+a.flags.seeCost}${+a.flags.seeProfit}${+a.flags.seeMargin}|${[...a.warehouseIds].sort().join(",")}`;
+const audienceKey = (a: FileAudience) => `${+a.flags.seeCost}${+a.flags.seeProfit}${+a.flags.seeMargin}${+!!a.flags.overheads}|${[...a.warehouseIds].sort().join(",")}`;
 
-/** A file a viewer may download: they see at least what it was generated for. */
+/**
+ * Who gets which file: the owner's view, or for a user recipient only what both may see — flags
+ * (incl. overhead access) intersected, warehouses in common. Pure; exported for tests.
+ */
+export function recipientAudience(owner: Pick<ReportViewer, "flags" | "warehouseIds">, recipient: Pick<ReportViewer, "flags" | "warehouseIds">): FileAudience {
+  return { flags: intersectFlags(owner.flags, recipient.flags), warehouseIds: owner.warehouseIds.filter((w) => recipient.warehouseIds.includes(w)) };
+}
+
+/** A file a viewer may download: they see at least what it was generated for (flags incl. overhead access, and warehouses). */
 export function covers(viewer: ReportViewer, a: FileAudience): boolean {
-  const flagsOk = (Object.keys(a.flags) as (keyof FileAudience["flags"])[]).every((f) => !a.flags[f] || viewer.flags[f]);
+  const flagsOk = (Object.keys(a.flags) as (keyof FileAudience["flags"])[]).every((f) => !a.flags[f] || viewer.flags[f] === true);
   return flagsOk && a.warehouseIds.every((w) => viewer.warehouseIds.includes(w));
 }
 
@@ -180,7 +188,9 @@ export class ScheduleService {
   /**
    * Runs a schedule as its owner, with the owner's permissions *now*. Each user recipient must
    * have Reports ≥ VIEW themselves and gets a file limited to what both they and the owner can
-   * see (flags and warehouses). External addresses get the owner's view, only while the owner has FULL.
+   * see (flags incl. overhead access, and warehouses). A recipient whose view can't run the
+   * report at all (e.g. an overheads report without overhead access) is skipped. External
+   * addresses get the owner's view, only while the owner has FULL.
    */
   async execute(runId: string) {
     const run = await this.d.store.run(runId);
@@ -199,7 +209,7 @@ export class ScheduleService {
       } catch (err) {
         return this.fail(runId, s, `the owner can no longer run it with these filters (${(err as Error).message})`, true);
       }
-      const ownerAudience: FileAudience = { flags: owner.flags, warehouseIds: [...owner.warehouseIds] };
+      const ownerAudience = recipientAudience(owner, owner);
       const groups = new Map<string, { audience: FileAudience; emails: string[] }>([[audienceKey(ownerAudience), { audience: ownerAudience, emails: [] }]]);
       const skipped: string[] = [];
       for (const u of await this.d.store.users(s.recipientUserIds)) {
@@ -208,7 +218,7 @@ export class ScheduleService {
           skipped.push(u.name);
           continue;
         }
-        const audience: FileAudience = { flags: intersectFlags(owner.flags, v.flags), warehouseIds: owner.warehouseIds.filter((w) => v.warehouseIds.includes(w)) };
+        const audience = recipientAudience(owner, v);
         if (!audience.warehouseIds.length) {
           skipped.push(u.name);
           continue;

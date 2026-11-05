@@ -7,6 +7,7 @@ import { api } from "@/lib/api-client";
 import { EntryForm } from "./EntryForm";
 import { EntryList } from "./EntryList";
 import { StockLevels } from "./StockLevels";
+import type { ImportDocType } from "./import-docs";
 import type { EntryDto, EntryType, StockCaps, WarehouseDto } from "./types";
 import styles from "./stock.module.css";
 
@@ -17,12 +18,14 @@ interface Props {
   warehouses: WarehouseDto[];
   initialTab: StockTab;
   defaultVat: string;
+  /** Import documents required before posting a GRN (Imported). */
+  requiredDocs?: ImportDocType[];
   /** ?po=: open the new-entry form receiving against this purchase order. */
   initialPoId?: string;
   prefill?: { type?: EntryType; projectId?: string; warehouseId?: string };
 }
 
-export function StockWorkspace({ caps, warehouses, initialTab, defaultVat, initialPoId, prefill }: Props) {
+export function StockWorkspace({ caps, warehouses, initialTab, defaultVat, requiredDocs, initialPoId, prefill }: Props) {
   const [tab, setTab] = useState<StockTab>(initialTab);
   const [pending, setPending] = useState<number | null>(null);
   const [incoming, setIncoming] = useState<EntryDto[]>([]);
@@ -76,7 +79,7 @@ export function StockWorkspace({ caps, warehouses, initialTab, defaultVat, initi
       ) : null}
       <Tabs items={items} selected={selected} onChange={change} label="Stock" />
       <div className={styles.tabPanel}>
-        {selected === "new" ? <EntryForm caps={caps} warehouses={warehouses} defaultVat={defaultVat} initialPoId={initialPoId} prefill={prefill} /> : null}
+        {selected === "new" ? <EntryForm caps={caps} warehouses={warehouses} defaultVat={defaultVat} requiredDocs={requiredDocs} initialPoId={initialPoId} prefill={prefill} /> : null}
         {selected === "entries" ? <EntryList caps={caps} warehouses={warehouses} mode="all" /> : null}
         {selected === "pending" ? <EntryList caps={caps} warehouses={warehouses} mode="pending" onCount={onCount} /> : null}
         {selected === "levels" ? <StockLevels caps={caps} warehouses={warehouses} /> : null}

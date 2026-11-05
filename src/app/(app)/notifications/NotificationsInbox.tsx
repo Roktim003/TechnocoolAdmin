@@ -58,11 +58,11 @@ export function NotificationsInbox() {
           </Link>
         </div>
       </div>
-      <section className={styles.section} style={{ padding: 0 }}>
-        {result?.data.length === 0 ? <p className={styles.muted} style={{ padding: "var(--space-6) var(--space-5)" }}>No notifications.</p> : null}
+      <section className={styles.section} style={{ padding: 0, overflow: "hidden" }}>
+        {result?.data.length === 0 ? <p className={styles.muted} style={{ padding: "var(--s-6) var(--s-4)", textAlign: "center" }}>No notifications.</p> : null}
         <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-          {result?.data.map((n) => (
-            <li key={n.id} style={{ borderBottom: "1px solid var(--color-border)", padding: "var(--space-4) var(--space-5)", boxShadow: n.readAt ? undefined : "inset 3px 0 0 var(--color-primary)" }}>
+          {result?.data.map((n, i) => (
+            <li key={n.id} style={{ borderTop: i ? "1px solid var(--divider)" : undefined, padding: "var(--s-3) var(--s-4)", background: n.readAt ? undefined : "color-mix(in srgb, var(--accent-soft) 45%, transparent)", fontSize: "var(--fs)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-4)", flexWrap: "wrap" }}>
                 {n.link ? (
                   <Link href={n.link} onClick={() => read(n)} style={{ fontWeight: n.readAt ? undefined : 600 }}>
@@ -73,7 +73,7 @@ export function NotificationsInbox() {
                 )}
                 <span className={styles.muted}>{formatDateTime(n.createdAt)}</span>
               </div>
-              <div className={styles.muted} style={{ marginTop: "var(--space-2)" }}>
+              <div className={styles.muted} style={{ marginTop: "var(--s-1)" }}>
                 {n.body}
               </div>
             </li>

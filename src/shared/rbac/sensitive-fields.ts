@@ -1,4 +1,4 @@
-import type { SensitiveFlag, SensitiveFlags } from "./levels";
+import { canSeeOverheads, type PermissionMap, type SensitiveFlag, type SensitiveFlags } from "./levels";
 
 /**
  * Field names that carry sensitive money data, grouped by the role flag that unlocks them.
@@ -64,16 +64,40 @@ export const SENSITIVE_FIELDS: Record<SensitiveFlag, readonly string[]> = {
     "valueAge180plus",
     "salesCost",
     "netCostValue",
+    // import documents: Commercial Invoice value
+    "ciValue",
+    "landedCostTotal",
   ],
   seeProfit: ["profit", "grossProfit", "netProfit", "profitAmount", "profitPercent"],
   seeMargin: ["margin", "marginPercent", "marginAmount", "contractValue", "costUsedPercent"],
 };
 
-function hiddenKeys(flags: SensitiveFlags): Set<string> {
+/**
+ * Overhead figures (store charge, holding, established cost and what is built on them). They need
+ * overheads ≥ VIEW and seeCost. When the caller passes the user's permissions (the API route
+ * wrapper always passes the principal) they're stripped for everyone without that access — a
+ * safety net behind the mappers, which leave them out already. Never reuse these names for other data.
+ */
+export const OVERHEAD_FIELDS: readonly string[] = [
+  "storeChargeCost",
+  "holdingCost",
+  "establishmentCost",
+  "overheadCost",
+  "fullCost",
+  "directMargin",
+  "directMarginPercent",
+  "directCostUsedPercent",
+  "overheadsThisMonth",
+  "overheadsNotCharged",
+  "overheadPercentOfDirect",
+];
+
+function hiddenKeys(flags: SensitiveFlags, overheads = true): Set<string> {
   const hidden = new Set<string>();
   for (const flag of Object.keys(SENSITIVE_FIELDS) as SensitiveFlag[]) {
     if (!flags[flag]) for (const key of SENSITIVE_FIELDS[flag]) hidden.add(key);
   }
+  if (!overheads) for (const key of OVERHEAD_FIELDS) hidden.add(key);
   return hidden;
 }
 
@@ -91,8 +115,8 @@ function strip(value: unknown, hidden: Set<string>): unknown {
  * Returns a deep copy of `dto` without the cost / profit / margin fields the user may not see.
  * Applied by the route wrapper to every authenticated response, and callable directly.
  */
-export function filterSensitiveFields<T>(dto: T, user: { flags: SensitiveFlags }): T {
-  const hidden = hiddenKeys(user.flags);
+export function filterSensitiveFields<T>(dto: T, user: { flags: SensitiveFlags; permissions?: Partial<PermissionMap> }): T {
+  const hidden = hiddenKeys(user.flags, !user.permissions || canSeeOverheads({ permissions: user.permissions, flags: user.flags }));
   if (hidden.size === 0) return dto;
   return strip(dto, hidden) as T;
 }

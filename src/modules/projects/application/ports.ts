@@ -12,9 +12,13 @@ export interface ProjectsActor extends ActorContext {
   level: PermissionLevel;
   inventoryLevel: PermissionLevel;
   purchasingLevel: PermissionLevel;
+  /** overheads module level */
+  overheadsLevel: PermissionLevel;
   warehouseIds: string[];
   canSeeCost: boolean;
   canSeeMargin: boolean;
+  /** overheads ≥ VIEW and seeCost: sees overhead amounts, full cost and full-cost margin. */
+  canSeeOverheads: boolean;
   /** The built-in Admin role (may undo a close). */
   isAdmin: boolean;
 }
@@ -47,6 +51,8 @@ export interface ProjectRecord {
   closedBy: Ref | null;
   closeReason: string | null;
   costAlertLevel: number;
+  /** Cost alert level on full cost (recipients who can see overheads). */
+  fullCostAlertLevel: number;
   createdBy: Ref | null;
   isActive: boolean;
   createdAt: Date;
@@ -79,12 +85,30 @@ export interface CostRecord {
   amount: string;
   vendorOrPayee: string | null;
   referenceNo: string | null;
+  /** Overheads: months covered (YYYY-MM-DD) and how the amount was worked out. */
+  periodFrom: string | null;
+  periodTo: string | null;
+  basisNote: string | null;
   createdBy: Ref;
+  updatedBy: Ref | null;
+  updatedAt: Date;
   voidedAt: Date | null;
   voidedBy: Ref | null;
   voidReason: string | null;
   attachmentCount: number;
   createdAt: Date;
+}
+
+export interface CostWrite {
+  date: string;
+  category: CostCategory;
+  description: string;
+  amount: string;
+  vendorOrPayee: string | null;
+  referenceNo: string | null;
+  periodFrom: string | null;
+  periodTo: string | null;
+  basisNote: string | null;
 }
 
 export interface StatusHistoryRecord {
@@ -139,7 +163,7 @@ export interface ProjectsStore {
   nextNumber(docType: string, fiscalYear: string): Promise<number>;
   peekNumber(docType: string, fiscalYear: string): Promise<number>;
   createProject(data: ProjectWrite & { code: string; status: ProjectStatus; createdById: string }): Promise<string>;
-  updateProject(id: string, data: Partial<ProjectWrite & { status: ProjectStatus; actualEndDate: string | null; closedAt: Date | null; closedById: string | null; closeReason: string | null; isActive: boolean; costAlertLevel: number }>): Promise<void>;
+  updateProject(id: string, data: Partial<ProjectWrite & { status: ProjectStatus; actualEndDate: string | null; closedAt: Date | null; closedById: string | null; closeReason: string | null; isActive: boolean; costAlertLevel: number; fullCostAlertLevel: number }>): Promise<void>;
   addHistory(data: { projectId: string; fromStatus: ProjectStatus | null; toStatus: ProjectStatus; changedById: string; reason: string | null }): Promise<void>;
   history(projectId: string): Promise<StatusHistoryRecord[]>;
   /** Projects material may be issued to / returned for (options for the stock form). */
@@ -148,7 +172,10 @@ export interface ProjectsStore {
   costs(projectId: string, filters: { category?: CostCategory; includeVoided: boolean }): Promise<CostRecord[]>;
   cost(id: string): Promise<CostRecord | null>;
   lockCost(id: string): Promise<CostRecord | null>;
-  addCost(data: { projectId: string; date: string; category: CostCategory; description: string; amount: string; vendorOrPayee: string | null; referenceNo: string | null; createdById: string }): Promise<string>;
+  addCost(data: CostWrite & { projectId: string; createdById: string }): Promise<string>;
+  updateCost(id: string, data: CostWrite & { updatedById: string }): Promise<void>;
+  /** Audit rows of one cost line (add, edit, void), oldest first. */
+  costAudit(projectId: string, costId: string): Promise<AuditRow[]>;
   voidCost(id: string, data: { voidedById: string; voidReason: string }): Promise<void>;
   /** Non-voided cost totals per project and category. */
   costTotals(projectIds: string[]): Promise<Map<string, Record<CostCategory, string>>>;
@@ -182,7 +209,11 @@ export interface FileStore {
 /** Notifications (implemented in interface/events.ts). Never throws. */
 export interface ProjectsNotifier {
   statusChanged(p: ProjectRecord, from: ProjectStatus, to: ProjectStatus, ctx: { actorId: string; actorName: string; reason: string | null }): Promise<void>;
-  costAlert(p: ProjectRecord, threshold: 90 | 100, summary: { totalCost: string; contractValue: string; costUsedPercent: string }): Promise<void>;
+  /**
+   * `basis` "direct": sent to recipients who can't see overheads (direct cost); "full": to those
+   * who can (full cost incl. overheads).
+   */
+  costAlert(p: ProjectRecord, threshold: 90 | 100, summary: { totalCost: string; contractValue: string; costUsedPercent: string }, basis: "direct" | "full"): Promise<void>;
 }
 
 export const noNotifier: ProjectsNotifier = { statusChanged: async () => undefined, costAlert: async () => undefined };
@@ -195,5 +226,5 @@ export interface CostAlertQueue {
 export const noAlertQueue: CostAlertQueue = { enqueue: async () => undefined };
 
 export interface CostStatementQueue {
-  enqueue(job: { projectId: string; userId: string; userName: string; showMargin: boolean }): Promise<{ jobId: string }>;
+  enqueue(job: { projectId: string; userId: string; userName: string; showMargin: boolean; showOverheads: boolean }): Promise<{ jobId: string }>;
 }

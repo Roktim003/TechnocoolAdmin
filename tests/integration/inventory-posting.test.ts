@@ -5,7 +5,7 @@ import { fiscalYear } from "@/modules/inventory/domain/numbering";
 import { call } from "../helpers/http";
 import { resetDatabase } from "../helpers/db";
 import { adminToken } from "../helpers/fixtures";
-import { balance, cost, createEntry, customer, grn, key, post, prisma, product, project, receive, setProjectStatus, supplier, userToken, wh } from "../helpers/inventory";
+import { balance, cost, createEntry, customer, grn, key, noImportDocsRequired, post, prisma, product, project, receive, setProjectStatus, supplier, userToken, wh } from "../helpers/inventory";
 
 let token: string;
 let A: string;
@@ -83,6 +83,9 @@ describe("weighted average cost", () => {
 });
 
 describe("GRN (imported) landed cost", () => {
+  // These tests are about landed cost, not import documents.
+  beforeEach(noImportDocsRequired);
+
   it("applies % and amount charges, spreads included charges by goods value, and records excluded ones", async () => {
     const p1 = await product(token);
     const p2 = await product(token);
@@ -305,6 +308,7 @@ describe("calculate", () => {
   });
 
   it("matches import landed cost exactly", async () => {
+    await noImportDocsRequired(); // about landed cost, not import documents
     const p = await product(token);
     const body = {
       type: "GRN_IMPORT",

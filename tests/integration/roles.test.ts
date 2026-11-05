@@ -23,16 +23,16 @@ describe("seeded roles", () => {
   it("match the approved permission matrix", async () => {
     const res = await call(matrixRoute.GET, "GET", "/roles/matrix", { token });
     expect(res.status).toBe(200);
-    expect(res.body.data.modules.map((m: any) => m.key)).toEqual(["dashboard", "catalog", "inventory", "purchasing", "projects", "reports", "users"]);
+    expect(res.body.data.modules.map((m: any) => m.key)).toEqual(["dashboard", "catalog", "inventory", "purchasing", "projects", "reports", "users", "overheads"]);
     const byName = Object.fromEntries(res.body.data.roles.map((r: any) => [r.name, r]));
     expect(Object.keys(byName)).toEqual(["Admin", "Accounts", "Manager", "Store Manager"]);
     expect(byName.Admin).toMatchObject({ isLocked: true, userCount: 1, flags: { seeCost: true, seeProfit: true, seeMargin: true } });
     expect(Object.values(byName.Admin.permissions).every((l) => l === "FULL")).toBe(true);
-    expect(byName.Accounts.permissions).toEqual({ dashboard: "VIEW", catalog: "VIEW", inventory: "APPROVE", purchasing: "VIEW", projects: "VIEW", reports: "FULL", users: "NONE" });
+    expect(byName.Accounts.permissions).toEqual({ dashboard: "VIEW", catalog: "VIEW", inventory: "APPROVE", purchasing: "VIEW", projects: "VIEW", reports: "FULL", users: "NONE", overheads: "FULL" });
     expect(byName.Accounts.flags).toEqual({ seeCost: true, seeProfit: true, seeMargin: false });
-    expect(byName.Manager.permissions).toMatchObject({ inventory: "APPROVE", purchasing: "CREATE", projects: "CREATE", reports: "NONE" });
+    expect(byName.Manager.permissions).toMatchObject({ inventory: "APPROVE", purchasing: "CREATE", projects: "CREATE", reports: "NONE", overheads: "NONE" });
     expect(byName.Manager.flags).toEqual({ seeCost: true, seeProfit: false, seeMargin: false });
-    expect(byName["Store Manager"].permissions).toMatchObject({ inventory: "CREATE", purchasing: "NONE" });
+    expect(byName["Store Manager"].permissions).toMatchObject({ inventory: "CREATE", purchasing: "NONE", overheads: "NONE" });
     expect(byName["Store Manager"].flags).toEqual({ seeCost: false, seeProfit: false, seeMargin: false });
   });
 });

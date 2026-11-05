@@ -1,4 +1,5 @@
 import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { Select } from "./Select";
 import styles from "./Field.module.css";
 
 interface FieldShellProps {
@@ -66,14 +67,15 @@ export function SelectField({ label, error, helper, fieldClassName, hideLabel, c
   const id = useId();
   return (
     <FieldShell id={id} label={hideLabel ? <span className="visually-hidden">{label}</span> : label} error={error} helper={helper} className={fieldClassName}>
-      <select
+      <Select
         id={id}
         className={[styles.input, styles.select, error ? styles.invalid : "", className].filter(Boolean).join(" ")}
         aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : helper ? `${id}-helper` : undefined}
         {...props}
       >
         {children}
-      </select>
+      </Select>
     </FieldShell>
   );
 }

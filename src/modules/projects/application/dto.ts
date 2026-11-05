@@ -81,17 +81,45 @@ export const CostListQuerySchema = z
   .object({ category: emptyToUndefined(CostCategorySchema), includeVoided: emptyToUndefined(booleanLike).openapi({ type: "boolean" }) })
   .strict();
 
+const Amount = MoneySchema.refine((v) => Number(v) > 0, "Enter an amount above 0.");
+const OptionalReason = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), Reason.optional());
+const overheadFields = {
+  periodFrom: nullableDate.openapi({ type: "string", description: "Overheads only: first month the charge covers (stored as the 1st)" }),
+  periodTo: nullableDate.openapi({ type: "string", description: "Overheads only: last month the charge covers (stored as the last day)" }),
+  basisNote: text(300).openapi({ description: "Overheads only: how the amount was worked out, e.g. \"2% of material issued\" (information only)" }),
+};
+
 export const AddCostSchema = z
   .object({
     date: IsoDate.optional().openapi({ description: "Defaults to today (Asia/Dhaka)" }),
-    category: CostCategorySchema,
+    category: CostCategorySchema.openapi({
+      description: "LABOUR / TRANSPORT / OTHER need projects ≥ CREATE. STORE_CHARGE / HOLDING / ESTABLISHMENT (overheads) need overheads ≥ CREATE and seeCost.",
+    }),
     description: z.string().trim().min(1, "Describe the cost.").max(300),
-    amount: MoneySchema.refine((v) => Number(v) > 0, "Enter an amount above 0."),
+    amount: Amount,
     vendorOrPayee: text(150),
     referenceNo: text(100),
+    ...overheadFields,
+    reason: OptionalReason.openapi({ type: "string", description: "Required for an overhead on a CLOSED project" }),
   })
   .strict()
   .openapi("AddProjectCostRequest");
 export type AddCostInput = z.infer<typeof AddCostSchema>;
+
+/** PATCH: overhead lines only. Omitted fields keep their value. */
+export const UpdateCostSchema = z
+  .object({
+    date: IsoDate.optional(),
+    category: CostCategorySchema.optional().openapi({ description: "Another overhead category only" }),
+    description: z.string().trim().min(1, "Describe the cost.").max(300).optional(),
+    amount: Amount.optional(),
+    vendorOrPayee: text(150),
+    referenceNo: text(100),
+    ...overheadFields,
+    reason: OptionalReason.openapi({ type: "string", description: "Why it changed; required on a CLOSED project" }),
+  })
+  .strict()
+  .openapi("UpdateProjectCostRequest");
+export type UpdateCostInput = z.infer<typeof UpdateCostSchema>;
 
 export const VoidCostSchema = z.object({ reason: Reason }).strict().openapi("VoidProjectCostRequest");

@@ -3,6 +3,7 @@ import { listQuerySchema } from "@/shared/pagination/list-query";
 import { MoneySchema, QuantitySchema } from "@/shared/money/money";
 import { DateRangeFilters } from "@/shared/time/dates";
 import { CURRENCIES, ENTRY_TYPES, USER_ENTRY_TYPES } from "../domain/types";
+import { ATTACHMENT_DOC_TYPES, IMPORT_DOC_TYPES, INCOTERMS } from "../domain/import-docs";
 
 /* ───────────────────────────── helpers ───────────────────────────── */
 
@@ -57,9 +58,55 @@ export const LineInputSchema = z
     originalLineId: nullableId,
     purchaseOrderLineId: nullableId.openapi({ description: "GRNs against a PO: the PO line (matched by product when omitted)" }),
     serials: z.array(z.string().trim().min(1).max(100)).max(1000).optional().openapi({ description: "Required (exactly qty) for serial-tracked products" }),
+    countryOfOrigin: text(100).openapi({ description: "GRN (Imported) only. Defaults to the product's country of origin, else the Certificate of Origin's." }),
     note: text(500),
   })
   .strict();
+
+/* ───────────────────────────── import documents ───────────────────────────── */
+
+export const ImportDocTypeSchema = z.preprocess(upper, z.enum(IMPORT_DOC_TYPES)).openapi({ type: "string", enum: [...IMPORT_DOC_TYPES] });
+export const AttachmentDocTypeSchema = z.preprocess(upper, z.enum(ATTACHMENT_DOC_TYPES)).openapi({ type: "string", enum: [...ATTACHMENT_DOC_TYPES] });
+const nullableDate = z.preprocess((v) => (v === "" ? null : v), IsoDate.nullable().optional());
+const nullableDecimal3 = z.preprocess((v) => (v === "" ? null : v), QuantitySchema.nullable().optional());
+
+/** Shipment document details of a GRN (Imported). Every field is optional; omitted fields are cleared. */
+export const ImportShipmentSchema = z
+  .object({
+    blNo: text(100),
+    blDate: nullableDate,
+    shippingLine: text(150),
+    vesselVoyage: text(150),
+    portOfLoading: text(150),
+    portOfDischarge: text(150),
+    containerNumbers: z.array(z.string().trim().max(20, "At most 20 characters.")).max(100).optional().openapi({ description: "Container numbers (stored upper-case)" }),
+    coNo: text(100),
+    coDate: nullableDate,
+    countryOfOrigin: text(100),
+    coIssuingAuthority: text(150),
+    plNo: text(100),
+    plDate: nullableDate,
+    packageCount: z.preprocess((v) => (v === "" ? null : v), z.coerce.number().int().min(0).max(1_000_000).nullable().optional()),
+    grossWeightKg: nullableDecimal3.openapi({ type: "string", example: "1250.500" }),
+    netWeightKg: nullableDecimal3.openapi({ type: "string", example: "1180.000" }),
+    ciNo: text(100),
+    ciDate: nullableDate,
+    ciCurrency: z.preprocess((v) => (v === "" ? null : v), CurrencySchema.nullable().optional()),
+    ciValue: z.preprocess((v) => (v === "" ? null : v), MoneySchema.nullable().optional()).openapi({ type: "string", example: "45000.00", description: "Invoice value in the CI currency. Hidden without seeCost; users without seeCost can't set it." }),
+    incoterm: z.preprocess((v) => (v === "" ? null : upper(v)), z.enum(INCOTERMS).nullable().optional()).openapi({ type: "string", enum: [...INCOTERMS] }),
+    boeNo: text(100),
+    boeDate: nullableDate,
+    customsStation: text(150).openapi({ example: "Chattogram Custom House" }),
+  })
+  .strict()
+  .openapi("ImportShipment");
+export type ImportShipmentInput = z.infer<typeof ImportShipmentSchema>;
+
+export const AttachmentListQuerySchema = z.object({ docType: emptyToUndefined(AttachmentDocTypeSchema) });
+export const RemoveAttachmentSchema = z
+  .object({ reason: z.string().trim().min(3, "Give a reason (at least 3 characters).").max(500).optional() })
+  .strict()
+  .openapi("RemoveAttachmentRequest");
 
 export const ChargeInputSchema = z
   .object({
@@ -104,6 +151,9 @@ const entryShape = {
   lines: z.array(LineInputSchema).max(200).default([]),
   charges: z.array(ChargeInputSchema).max(20).default([]).openapi({ description: "Imports only: landed-cost charges" }),
   confirmBelowCost: z.boolean().optional().openapi({ description: "Admin only: allow a sale priced below average cost" }),
+  importShipment: ImportShipmentSchema.nullable()
+    .optional()
+    .openapi({ description: "GRN (Imported) only (400 for other types): the shipment documents. Omit to keep the stored details. `billOfEntryNo` is still accepted and fills boeNo when it is empty." }),
 };
 
 export const CreateEntrySchema = z
@@ -111,7 +161,11 @@ export const CreateEntrySchema = z
   .strict()
   .openapi("CreateStockEntryRequest");
 export const UpdateEntrySchema = z.object(entryShape).strict().openapi("UpdateStockEntryRequest");
-export const CalculateEntrySchema = z.object(entryShape).strict().openapi("CalculateStockEntryRequest");
+export const CalculateEntrySchema = z
+  .object({ ...entryShape, entryId: nullableId.openapi({ description: "Editing a saved entry: counts its uploaded import document files in the checklist" }) })
+  .strict()
+  .openapi("CalculateStockEntryRequest");
+export type CalculateEntryInput = z.infer<typeof CalculateEntrySchema>;
 
 export const ReasonSchema = z.object({ reason: z.string().trim().min(3, "Give a reason (at least 3 characters).").max(500) }).strict().openapi("ReasonRequest");
 export const ApproveSchema = z.object({ confirmBelowCost: z.boolean().optional() }).strict().openapi("ApproveRequest");
@@ -147,6 +201,11 @@ export const EntryFilterShape = {
   dateTo: DateRangeFilters.to,
   awaitingMyApproval: emptyToUndefined(booleanLike).openapi({ type: "boolean", description: "Pending entries I can verify (in my warehouses, not created by me)" }),
   awaitingMyReceipt: emptyToUndefined(booleanLike).openapi({ type: "boolean", description: "Dispatched transfers to my warehouses" }),
+  blNo: emptyToUndefined(z.string().trim().max(100)).openapi({ description: "Bill of Lading no. (partial match)" }),
+  ciNo: emptyToUndefined(z.string().trim().max(100)).openapi({ description: "Commercial Invoice no. (partial match)" }),
+  boeNo: emptyToUndefined(z.string().trim().max(100)).openapi({ description: "Bill of Entry no. (partial match)" }),
+  containerNo: emptyToUndefined(z.string().trim().max(20)).openapi({ description: "Container no. (exact, case-insensitive)" }),
+  countryOfOrigin: emptyToUndefined(z.string().trim().max(100)).openapi({ description: "Country of origin on the CO or on a line (case-insensitive)" }),
 };
 export const EntryListQuerySchema = listQuerySchema({ sortFields: ["entryDate", "createdAt", "number"], defaultSort: "-createdAt", filters: EntryFilterShape });
 export type EntryFilters = {
@@ -163,6 +222,11 @@ export type EntryFilters = {
   dateTo?: Date;
   awaitingMyApproval?: boolean;
   awaitingMyReceipt?: boolean;
+  blNo?: string;
+  ciNo?: string;
+  boeNo?: string;
+  containerNo?: string;
+  countryOfOrigin?: string;
 };
 
 /* ───────────────────────────── stock ───────────────────────────── */
@@ -228,6 +292,12 @@ export const UpdateSettingsSchema = z
     defaultSalesVatPercent: PercentSchema.optional(),
     adminWriteOffNeedsApproval: z.boolean().optional(),
     allowAdminBelowCostSale: z.boolean().optional(),
+    importDocsRequiredToPost: z
+      .array(ImportDocTypeSchema)
+      .max(5)
+      .transform((v) => [...new Set(v)])
+      .optional()
+      .openapi({ description: "Import documents (BL, CO, PL, CI, BOE) that need a number and a file before a GRN (Imported) can be posted" }),
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0, { message: "Provide at least one setting." })

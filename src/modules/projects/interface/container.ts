@@ -16,7 +16,7 @@ function build() {
   const stock = inventory().projectQuery;
   const costing = new ProjectCostingService({ store: () => uow.store, stock });
   const projects = new ProjectService({ uow, costing, stock, notifier: projectsNotifier, alerts: costAlertQueue });
-  const costs = new CostService({ uow, projects, alerts: costAlertQueue });
+  const costs = new CostService({ uow, projects, costing, alerts: costAlertQueue });
   return {
     uow,
     stock,

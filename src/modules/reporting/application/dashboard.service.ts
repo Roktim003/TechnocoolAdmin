@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
+import { d, type Dec } from "@/modules/inventory/domain/decimal";
 import { hasLevel } from "@/shared/rbac/levels";
 import { addDays, dhakaDate } from "../domain/schedule";
 import type { ChartData, ReportViewer } from "../domain/types";
+import { seesOverheads } from "../domain/visibility";
 import type { DashboardCache } from "./ports";
+
+/** Money string, never below zero. */
+const atLeastZero = (v: Dec) => (v.isNegative() ? "0.00" : v.toDecimalPlaces(2).toFixed(2));
 
 export interface KpiWidget {
   id: string;
@@ -62,7 +67,14 @@ export interface DashboardQueries {
   byBrand(scope: string[], money: boolean): Promise<{ label: string; value: string }[]>;
   inOut(scope: string[], from: string, to: string): Promise<{ date: string; inQty: string; outQty: string }[]>;
   topIssued(scope: string[], from: string): Promise<{ label: string; value: string }[]>;
-  projectCostVsContract(scope: string[]): Promise<{ label: string; cost: string; contract: string }[]>;
+  /** Cost per running / on-hold project: direct cost, or full cost (incl. overheads) when `withOverheads`. */
+  projectCostVsContract(scope: string[], withOverheads: boolean): Promise<{ label: string; cost: string; contract: string }[]>;
+  /**
+   * One month's overheads: `spent` = non-voided register lines (store charge / holding of these
+   * warehouses + the company's established cost); `charged` = what project overhead lines charge
+   * to that month (a period spread evenly over its months), same rule as the spent-vs-charged report.
+   */
+  overheadsMonth(scope: string[], month: string): Promise<{ spent: string; charged: string }>;
   recentActivity(scope: string[], limit: number): Promise<{ id: string; number: string; type: string; typeLabel: string; warehouse: string; postedAt: Date; by: string }[]>;
   /** What this user can approve now: entries / counts in their warehouses created or submitted by others, POs (own only with FULL). */
   approvals(viewer: ReportViewer, limit: number): Promise<{ entries: number; counts: number; pos: number; items: ApprovalItem[] }>;
@@ -87,10 +99,10 @@ const fmtDate = (d: Date) => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/
 export class DashboardService {
   constructor(private readonly d: { queries: DashboardQueries; cache: DashboardCache; now?: () => Date }) {}
 
-  /** Same permissions, flags and scope → same shared widgets. */
+  /** Same permissions, flags (incl. overhead access) and scope → same shared widgets. */
   cacheKey(v: ReportViewer): string {
-    const raw = JSON.stringify([v.permissions, v.flags, [...v.warehouseIds].sort(), v.isAdmin]);
-    return `dash:v1:${createHash("sha256").update(raw).digest("hex").slice(0, 32)}`;
+    const raw = JSON.stringify([v.permissions, v.flags.seeCost, v.flags.seeProfit, v.flags.seeMargin, seesOverheads(v.flags), [...v.warehouseIds].sort(), v.isAdmin]);
+    return `dash:v2:${createHash("sha256").update(raw).digest("hex").slice(0, 32)}`;
   }
 
   async build(v: ReportViewer): Promise<{ widgets: Widget[]; cached: boolean; generatedAt: string }> {
@@ -122,16 +134,20 @@ export class DashboardService {
     const pur = hasLevel(v.permissions.purchasing, "VIEW");
     const prj = hasLevel(v.permissions.projects, "VIEW");
     const rep = hasLevel(v.permissions.reports, "VIEW");
+    const oh = seesOverheads(v.flags);
     const link = (report: string, screen: string) => (rep ? `/reports?r=${report}` : screen);
     const today = dhakaDate(this.d.now?.() ?? new Date());
+    const thisMonth = `${today.slice(0, 8)}01`;
     const out: Widget[] = [];
 
-    const [value, low, pos, running, transfers] = await Promise.all([
+    const [value, low, pos, running, transfers, overheads] = await Promise.all([
       inv && v.flags.seeCost ? q.stockValue(scope) : null,
       inv ? q.lowStock(scope, 5) : null,
       pur ? q.openPos(scope, today) : null,
       prj ? q.runningProjects() : null,
       inv ? q.transfersToReceive(scope) : null,
+      // Overhead amounts only with overhead access (overheads ≥ VIEW + seeCost).
+      oh ? q.overheadsMonth(scope, thisMonth) : null,
     ]);
     if (value !== null) out.push({ id: "stock-value", kind: "kpi", title: "Stock value", value, valueType: "money", tone: "default", caption: "At average cost, your warehouses", link: link("stock-summary", "/stock?tab=levels") });
     if (low) out.push({ id: "low-stock", kind: "kpi", title: "Low stock items", value: low.count, valueType: "number", tone: low.count ? "warning" : "default", caption: "Below their minimum level", link: link("low-stock", "/stock/low-stock") });
@@ -141,6 +157,12 @@ export class DashboardService {
     }
     if (running !== null) out.push({ id: "running-projects", kind: "kpi", title: "Running projects", value: running, valueType: "number", tone: "default", link: rep ? "/reports?r=project-cost-summary&status=RUNNING" : "/projects" });
     if (transfers !== null) out.push({ id: "transfers", kind: "kpi", title: "Transfers to receive", value: transfers, valueType: "number", tone: transfers ? "warning" : "default", caption: "Dispatched to your warehouses", link: "/stock?tab=entries" });
+    if (overheads) {
+      const notCharged = atLeastZero(d(overheads.spent).minus(d(overheads.charged)));
+      const spentVsCharged = rep ? "/reports?r=overheads-spent-vs-charged&monthFrom=thisMonth&monthTo=thisMonth" : "/warehouse-costs";
+      out.push({ id: "overheadsThisMonth", kind: "kpi", title: "Overheads this month", value: overheads.spent, valueType: "money", tone: "default", caption: "Store charge, holding and established cost entered", link: spentVsCharged });
+      out.push({ id: "overheadsNotCharged", kind: "kpi", title: "Not yet charged to projects", value: notCharged, valueType: "money", tone: "default", caption: "This month's overheads not charged to any project", link: spentVsCharged });
+    }
 
     if (inv) {
       const from = addDays(today, -29);
@@ -165,11 +187,19 @@ export class DashboardService {
       });
     }
     if (prj && v.flags.seeMargin && v.flags.seeCost) {
-      const rows = await q.projectCostVsContract(scope);
+      // Overhead viewers see full cost (as on the project screen); everyone else the direct cost only.
+      const rows = await q.projectCostVsContract(scope, oh);
       out.push({
         id: "project-cost",
         kind: "chart",
-        chart: { type: "stacked", title: "Project cost vs contract value", valueType: "money", requires: "seeMargin", series: ["Total cost", "Remaining contract"], points: rows.map((r) => ({ label: r.label, values: [r.cost, Math.max(0, Number(r.contract) - Number(r.cost)).toFixed(2)] })) },
+        chart: {
+          type: "stacked",
+          title: "Project cost vs contract value",
+          valueType: "money",
+          requires: oh ? ["seeMargin", "overheads"] : "seeMargin",
+          series: [oh ? "Full cost" : "Total cost", "Remaining contract"],
+          points: rows.map((r) => ({ label: r.label, values: [r.cost, atLeastZero(d(r.contract).minus(d(r.cost)))] })),
+        },
         link: link("project-cost-summary", "/projects"),
       });
     }

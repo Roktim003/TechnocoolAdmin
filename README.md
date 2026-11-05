@@ -1,8 +1,7 @@
 # StockBook
 
 Inventory management for an HVAC contractor (2 warehouses; LG / Daikin / Dunham-Bush).
-This repository contains **Module 0** (foundation, authentication, users & roles), **Module 1** (product catalog), **Module 2** (warehouses & stock in / out), **Module 3** (opening stock import, stock counts, notifications & low-stock alerts), **Module 4** (suppliers & purchase orders) and **Module 5** (projects & project costing).
-Reports and the dashboard come in later modules.
+This repository contains **Module 0** (foundation, authentication, users & roles), **Module 1** (product catalog), **Module 2** (warehouses & stock in / out), **Module 3** (opening stock import, stock counts, notifications & low-stock alerts), **Module 4** (suppliers & purchase orders), **Module 5** (projects & project costing), **Module 6** (reports, dashboard & scheduled emails) and **import documents** on GRN · Imported (BL, CO, PL, CI, B/E with file uploads).
 
 - **Stack:** Next.js 15 (App Router, TypeScript strict) · REST route handlers + thin server actions · PostgreSQL + Prisma 6 · Zod · JWT access tokens + rotating refresh tokens · RBAC with warehouse scope · Redis + BullMQ · S3-compatible storage (MinIO in dev) + sharp · ExcelJS · OpenAPI generated from Zod · handwritten CSS Modules · Pino · Vitest · Docker / Coolify
 - **Locale:** timezone Asia/Dhaka, currency BDT.
@@ -157,7 +156,7 @@ src/
 
 ## RBAC
 
-Modules `dashboard, catalog, inventory, purchasing, projects, reports, users`, each with a level `NONE < VIEW < CREATE < APPROVE < FULL`. Roles also carry three flags: `seeCost`, `seeProfit`, `seeMargin`. Each user is scoped to one or more warehouses. Permissions live in PostgreSQL and are cached in Redis; the cache is invalidated whenever a role or user changes, so edits apply on the user's next request. Admin is locked: always FULL with every flag, and cannot be edited or deleted.
+Modules `dashboard, catalog, inventory, purchasing, projects, reports, users, overheads`, each with a level `NONE < VIEW < CREATE < APPROVE < FULL`. Roles also carry three flags: `seeCost`, `seeProfit`, `seeMargin`. Each user is scoped to one or more warehouses. Permissions live in PostgreSQL and are cached in Redis; the cache is invalidated whenever a role or user changes, so edits apply on the user's next request. Admin is locked: always FULL with every flag, and cannot be edited or deleted.
 
 ## Product catalog (Module 1)
 
@@ -244,7 +243,7 @@ Seeded: Admin FULL; Accounts and Manager APPROVE; Store Manager CREATE.
 
 Endpoints (under `/api/v1`, details in Swagger):
 - `stock-entries` (list with `type`, `status`, `warehouseId`, party, `productId`, dates, `awaitingMyApproval`, `awaitingMyReceipt`), `POST stock-entries` (`action: draft|submit|post`), `POST stock-entries/calculate`, `GET|PATCH stock-entries/:id`, `POST stock-entries/:id/{submit,post,approve,reject,cancel,reverse,receive}`.
-- Attachments: `GET|POST stock-entries/:id/attachments` (PDF / JPG / PNG / WebP by content, ≤ 10 MB, ≤ 20 per entry), `GET|DELETE stock-entries/:id/attachments/:attachmentId`.
+- Attachments: `GET|POST stock-entries/:id/attachments` (PDF / JPG / PNG / WebP by content, ≤ 10 MB, ≤ 20 per entry), `GET|DELETE stock-entries/:id/attachments/:attachmentId`. Import document files of a GRN · Imported use the same endpoints with a `docType` (see [Import documents](#import-documents-grn--imported)).
 - Documents: `POST stock-entries/:id/documents` (`kind` optional) queues a PDF (GRN, delivery challan, sales invoice, return / write-off / transfer / reversal note) that the **worker** renders with headless Chromium; poll `GET documents/:jobId`, download with `?download=1`.
 - Stock: `stock/balances`, `stock/products/:productId` (stock card + ledger), `stock/availability?productId&warehouseId`, `stock/movements`; `serials`, `serials/:id` (with history).
 - Masters: `customers` (suppliers: see Module 4; projects: see Module 5): list, create, get, update, `/:id/deactivate`. `inventory-settings`: GET / PATCH (FULL).
@@ -402,7 +401,7 @@ Seed (sample data on): PRJ-001 running with issues, a return (part damaged), lab
 
 ## Reports, dashboard & scheduled emails (Module 6)
 
-Code: `src/modules/reporting` (domain / application / infrastructure / interface). UI: `/reports` (tabs *Reports (14) · Scheduled emails (n)*) and the dashboard at `/` → `/dashboard`. Charts: `src/components/charts/Chart.tsx` (in-house SVG: bar, hbar, line, stacked, donut; Carbon palette; tooltip, *View as table*, empty state).
+Code: `src/modules/reporting` (domain / application / infrastructure / interface). UI: `/reports` (tabs *Reports (15) · Scheduled emails (n)*) and the dashboard at `/` → `/dashboard`. Charts: `src/components/charts/Chart.tsx` (in-house SVG: bar, hbar, line, stacked, donut; Carbon palette; tooltip, *View as table*, empty state).
 
 **Reporting is read-only.** Every report query runs in a `READ ONLY` transaction with `statement_timeout` (`REPORT_QUERY_TIMEOUT_MS`, default 30 s). A slow query fails with `503 QUERY_TIMEOUT` ("Narrow the filters…"). Aggregation, sorting and paging happen in PostgreSQL. Reporting never calls another module's write services.
 
@@ -421,7 +420,7 @@ These rules apply in the API and in the export and email code, for every report,
 - **Columns**: cost needs `seeCost`, profit needs `seeProfit`, and contract/margin needs `seeMargin`. Accounts sees profit but not margin. A hidden column is absent from the JSON and from both file formats; totals and charts follow the same rule.
 - **Rows**: always limited to the user's warehouses. A `warehouseId` outside them gets 403, never an empty report.
 
-### The 14 reports
+### The 15 reports
 
 | # | Report (`id`) | Columns (flag) | Filters |
 |---|---|---|---|
@@ -429,9 +428,9 @@ These rules apply in the API and in the export and email code, for every report,
 | 2 | Stock movement (`stock-movement`) | date, entry no., type, warehouse, product code / name, in, out, unit cost (cost), value (cost) | date range, warehouse, brand, category, product, entry type |
 | 3 | Stock aging (`stock-aging`) | code, product, brand, qty 0–30 / 31–90 / 91–180 / 180+ days, total, oldest receipt, value per bucket (cost), total value (cost); donut by bucket | warehouse, brand, category, search, *age as of* |
 | 4 | Low stock (`low-stock`) | code, product, brand, unit, available, minimum, short by, suggested order; row action **Create PO** (purchasing ≥ CREATE only) | warehouse, brand, category, search |
-| 5 | Serial lookup (`serial-lookup`) | serial, product, status, current location, last entry, date | serial (partial), status, product, warehouse |
+| 5 | Serial lookup (`serial-lookup`) | serial, product, status, current location, last entry, date, B/E no., origin | serial (partial), status, product, warehouse |
 | 6 | Open POs & pending deliveries (`open-pos`) | PO, supplier, product, ordered, received, pending receipt, remaining, expected, delivery (overdue), PO status | supplier, warehouse, overdue only, search |
-| 7 | Purchases by supplier (`purchases-by-supplier`) | code, supplier, type, POs, ordered value (cost), GRNs, received imported / local / total at landed cost (cost) | date range, supplier, warehouse |
+| 7 | Purchases by supplier (`purchases-by-supplier`) | code, supplier, type, POs, ordered value (cost), GRNs, received imported / local / total at landed cost (cost), BL nos., B/E nos. | date range, supplier, warehouse |
 | 8 | Price history (`price-history`) | product, date, source (PO / GRN), document, supplier, currency, unit price (cost), unit price BDT (cost), change vs previous (cost); line chart | product, supplier, brand, date range, search |
 | 9 | Project cost summary (`project-cost-summary`) | code, project, client, status, material / labour / transport / other / total cost (cost), contract value, margin, margin % (margin) | status, date range (costs in the period), search |
 | 10 | Material by project (`material-by-project`) | project, product, unit, issued, returned, net, net cost (cost) | project, brand, category, date range, search |
@@ -439,6 +438,9 @@ These rules apply in the API and in the export and email code, for every report,
 | 12 | Damage & loss (`damage-loss`) | date, entry, type (write-off / count shortage), reason, warehouse, items, value (cost), status | date range, warehouse, status, search |
 | 13 | Pending verification (`pending`) | number, what, date, created by, warehouse, items, value (cost), waiting (days); row action *Open* | what (entry / count / PO / transfer), warehouse |
 | 14 | Audit log (`audit-log`) | date/time, user, action, record type, record, before → after summary (hidden fields scrubbed) | date range, user, record type, action |
+| 15 | Import shipments (`import-shipments`) | GRN no., date, supplier, BL no., container(s), CI no., CI currency, CI value (cost), B/E no., B/E date, customs station, origin(s), landed cost total (cost), files attached, documents (complete / incomplete), status | date range, supplier, warehouse, customs station, country of origin, documents incomplete only |
+
+**Import documents in reports.** *Import shipments* (#15, Purchases) lists every GRN (Imported) that is posted or waiting for verification, by entry date, with its shipment documents. Origin(s) are the lines' distinct countries of origin, or the Certificate of Origin's country when no line has one. *Documents* is "Complete" when every document in Inventory settings → *Import documents required to post* has a number and at least one attached file of that type (the same rule as posting). *Files attached* counts all import-document files, including Other. CI value and landed cost total need `seeCost`. *Stock movement* shows the BL no. and B/E no. on GRN (Imported) rows. *Purchases by supplier* lists the BL and B/E numbers of each supplier's posted imported GRNs in the period. *Serial number lookup* shows the B/E no. (linked to the GRN) and the country of origin of the GRN each unit came in on.
 
 ### Endpoints
 
@@ -531,6 +533,97 @@ Measured by `tests/integration/report-performance.test.ts` (PostgreSQL 16 in Doc
 | Stock aging | 402 ms |
 
 The test fails above 2 s.
+
+## Import documents (GRN · Imported)
+
+Code: `src/modules/inventory` (`domain/import-docs.ts`, `application/import-docs.service.ts`, `application/attachment.service.ts`). Every imported shipment comes with five documents, stored in `ImportShipment` (1:1 with the GRN) and, for the files, in the generic `Attachment` table tagged with a `docType`.
+
+| Code | Document | Fields |
+|---|---|---|
+| BL | Bill of Lading | BL no., BL date, shipping line, vessel / voyage, port of loading, port of discharge, container numbers (list, stored upper-case) |
+| CO | Certificate of Origin | CO no., issue date, country of origin, issuing authority |
+| PL | Packing List | PL no., date, number of packages, gross weight (kg), net weight (kg) |
+| CI | Commercial Invoice | CI no., CI date, invoice currency, invoice value (**cost**: hidden without `seeCost`), Incoterm (EXW / FOB / CFR / CIF / OTHER) |
+| BOE | Bill of Entry | B/E no., B/E date, customs station (e.g. Chattogram Custom House, Benapole, Dhaka ICD, Mongla) |
+
+Each line of a GRN · Imported also has a **country of origin**: it defaults from the product's country of origin, else from the CO, and stays editable per line. The LC no. stays on the entry. The old `billOfEntryNo` column moved to `ImportShipment.boeNo` (the migration copies existing values first); the API still accepts and returns `billOfEntryNo`, which fills / mirrors the B/E no.
+
+### Required before posting
+
+The inventory setting **`importDocsRequiredToPost`** (default **CI + BOE**; change it under *Stock → Settings* or `PATCH /inventory-settings`) lists the documents that need **both a number and at least one uploaded file** before the entry can be posted. Saving a draft and submitting for verification work with documents missing; **posting** (an Admin's direct post or the approval of a pending entry) is refused with `422` and one `IMPORT_DOCS_MISSING` detail per missing document (`meta.docType`). The posting engine checks this inside the posting transaction, so no path can skip it.
+
+Warnings (shown by `calculate` and on the entry, never blocking): CI currency differs from the GRN currency; CI value differs from the GRN goods value by more than 1 %; PL net weight above gross weight; B/E date before the BL date; the same BL, CI or B/E no. already on another GRN · Imported (with a link; one shipment can arrive in parts).
+
+### Upload rules
+
+- PDF, JPG or PNG, detected from the file's **content** (magic bytes; images must also decode with sharp), never from the name. ≤ 10 MB per file, ≤ 10 files per document type per entry (`422 ATTACHMENT_LIMIT`). Ordinary attachments without a `docType` keep their own rules.
+- Stored privately under `imports/{entryId}/{docType}/{uuid}-{safeFileName}`. File names are sanitised (no directories / path traversal, no special characters, ≤ 100 characters). Images get a 400 px WebP thumbnail; PDFs show a file icon.
+- Files are only served through the authenticated route `GET stock-entries/:id/attachments/:attachmentId/download` (`?inline=1` to view, `?variant=thumb`), with `X-Content-Type-Options: nosniff` and the sniffed content type, so a file is never rendered as HTML. Viewing needs inventory ≥ VIEW and the entry's warehouse in scope.
+- **Upload / edit details:** the entry's creator while DRAFT, PENDING or REJECTED; a verifier (inventory ≥ APPROVE, warehouse in scope) on a PENDING entry; inventory FULL at any time, including after posting. Store Managers can upload and view files; only the CI value is hidden from them (and they can't set it).
+- **Remove a file:** the uploader while the entry isn't posted; inventory FULL at any time, with a `reason` once the entry is posted.
+- After posting, document details and files stay editable by inventory FULL only; these edits are audit-logged with before / after and never change stock quantities or costs. Every upload and removal is audit-logged (who, when, file name, docType).
+
+Endpoints (under `/api/v1`):
+- `POST|PATCH stock-entries` and `POST stock-entries/calculate` accept an `importShipment` object (GRN · Imported only; `400 IMPORT_DOCS_NOT_ALLOWED` for other types) and a per-line `countryOfOrigin`. `calculate` returns `documentsChecklist` (per document: number filled, file count, required, complete) and the warnings; pass `entryId` when editing a saved entry so its files count.
+- `GET stock-entries/:id` adds `importShipment`, `documentsChecklist`, `importAttachments` (grouped by docType, with download and thumbnail URLs) and `importWarnings`.
+- `PATCH stock-entries/:id/import-shipment` edits the document details under the rules above.
+- `POST stock-entries/:id/attachments` (multipart: `file` repeatable, `docType` = BL | CO | PL | CI | BOE | OTHER), `GET stock-entries/:id/attachments?docType=CI`, `GET …/:attachmentId/download`, `DELETE …/:attachmentId` (`{ "reason": "…" }` when posted). Mobile apps upload with the bearer token (e.g. a phone photo of a document).
+- `GET stock-entries` filters `blNo`, `ciNo`, `boeNo`, `containerNo`, `countryOfOrigin`; `q` also matches BL, CI, B/E, CO and PL numbers and container numbers.
+
+UI: *Stock in / out → New entry → GRN · Imported* has an **Import documents** section after Landed cost (checklist tags, one box per document with its fields and an upload area, warnings, and an *Origin* column on the products table); *Post entry* / *Approve & post* stay disabled while required documents are missing. The entry detail page has an *Import documents* tab (details, file gallery, view / download, edit / upload / remove by permission). The GRN PDF prints a *Shipment documents* block. Seed: with sample data, one posted Daikin GRN · Imported with all five documents and sample files.
+
+## Overhead costs: store charge, holding cost, established cost
+
+Code: `src/modules/overheads` (the monthly register) and `src/modules/projects` (overhead lines on projects). Three overhead costs, all entered **manually as amounts** — no automatic rates, no automatic allocation:
+
+| Key | Label | Meaning |
+|---|---|---|
+| `STORE_CHARGE` | Store charge | Warehouse rent, store staff, loading / unloading |
+| `HOLDING` | Holding cost | Keeping stock: electricity, security, insurance, damage / ageing risk |
+| `ESTABLISHMENT` | Established cost (overhead) | Company overhead: office rent, admin / management salaries, utilities, vehicles |
+
+They are recorded in two places:
+- **Per project** (`ProjectCost` lines with these categories, optional *period from / to* and *basis note*, e.g. "2 % of material issued"): what is charged to the project. They are part of its full cost and margin.
+- **Per month** in the register (`WarehouseCost`, page *Warehouse costs*): what was actually spent — store charge and holding per warehouse, the established cost company-wide. Several lines per warehouse, month and category are allowed (rent and a salary as separate lines); reports sum them. Receipts and bills are ordinary attachments.
+
+**Why they don't change stock value.** Stock is valued at purchase / landed cost, the weighted average the posting engine keeps. Overheads are period costs of running the stores and the company, not part of what an item cost to buy and bring in; adding them to the average cost would make the stock value (and the cost of every later issue) depend on how much rent happened to be paid that month. So overhead entries never touch `StockMovement`, `StockBalance`, `ProductCost` or any unit / average cost — they are reported separately (tests check this).
+
+### Project figures
+
+The one project calculation (`summarize()` in `projects/domain/rules.ts`, used by the API, the pages, the cost statement PDF, alerts and reports):
+
+- **directCost** = net material + labour + transport + other (unchanged; still returned as `totalCost` too)
+- **overheadCost** = store charge + holding + established; **fullCost** = directCost + overheadCost
+- **margin** = contract value − fullCost (marginPercent and costUsedPercent on full cost); **directMargin** = contract value − directCost
+
+The 90 % / 100 % contract alerts are tracked on both bases: recipients who can see overheads are alerted on full cost, the others on direct cost (each threshold once per basis).
+
+### Permissions
+
+New RBAC module **`overheads`** (NONE / VIEW / CREATE / APPROVE / FULL). Seed: Admin FULL, Accounts FULL, Manager NONE, Store Manager NONE (the migration gives existing custom roles NONE).
+- Entering, editing or voiding any overhead (on a project or in the register) needs **overheads ≥ CREATE** and `seeCost`. Projects ≥ VIEW is enough for project overhead lines, so Accounts can charge them.
+- Seeing the amounts needs **overheads ≥ VIEW and `seeCost`**. Everyone else gets no overhead data in any API response, export, PDF, report, dashboard widget or email: project totals are direct cost only, margin is on direct cost, overhead lines and their history are hidden. The API's sensitive-field filter also strips the overhead field names (`OVERHEAD_FIELDS`) as a safety net.
+- Labour / transport / other keep their rules (projects ≥ CREATE to add, FULL to void, not on closed projects).
+
+### Rules
+
+- Overhead lines can be **edited** (not only voided) at any time, also on COMPLETED projects; on CLOSED projects a reason is required. The project figures update immediately. Labour / transport / other are still only voided and re-added.
+- Every create, edit and void is audit-logged with before / after and the reason; `GET …/history` returns one line's trail (shown on screen).
+- Voiding needs a reason; voided rows are excluded from totals and kept for history.
+- Amounts > 0. The register's month is at most one month ahead. Warehouse lines are store charge or holding (with a warehouse); the company line is the established cost.
+- Warnings (never blocking): a single overhead entry above BDT 10,00,000, or a project's overheads above 30 % of its direct cost.
+
+### Endpoints (under `/api/v1`)
+
+- Projects: `POST projects/:id/costs` (the three new categories), `PATCH projects/:id/costs/:costId` (overhead lines), `POST …/:costId/void`, `GET …/:costId/history`. `GET projects`, `projects/:id` and `projects/:id/material` summaries add `directCost`, and with overhead access `storeChargeCost`, `holdingCost`, `establishmentCost`, `overheadCost`, `fullCost`, `directMargin`.
+- Register: `GET|POST warehouse-costs` (filters `scope`, `warehouseId`, `category`, `monthFrom`, `monthTo`, `includeVoided`, `q`; `totals.amount`), `GET|PATCH warehouse-costs/:id`, `POST warehouse-costs/:id/void`, `GET warehouse-costs/:id/history`, `GET|POST|DELETE warehouse-costs/:id/attachments`.
+- `GET warehouse-costs/summary?monthFrom&monthTo` (`/summary/export` for Excel): per month and warehouse the store charge, holding, total, **average stock value** and **holding % of stock value**, plus a company row with the established cost. The average stock value is the mean of each day's closing stock value of that warehouse, taken from the stock ledger (days up to today for the current month).
+
+### Spent vs charged
+
+The report *Overheads: spent vs charged to projects* compares, per month and category, what the register says was **actually spent** with what was **charged to projects** (project overhead lines dated in that month — or, when a line has a period, its amount spread evenly over the period's months). The difference shows overheads not (yet) recovered through projects, or charged above what was spent. It is for information only and changes nothing.
+
+UI: project page tiles (store charge, holding, established, direct cost, overheads, full cost; margin on full cost with the direct margin underneath) and the *Other costs & overheads* tab (edit with reason, history, purple overhead tags, subtotals); project cards show *Full cost · incl. overheads*; the cost statement PDF adds an overheads section. **Warehouse costs** page (side nav, overheads ≥ VIEW): *Entries* and *Monthly summary* (table, chart, Excel). Seed: with sample data, three months of register lines for every warehouse and the company, and overhead lines on two sample projects.
 
 ## File storage
 

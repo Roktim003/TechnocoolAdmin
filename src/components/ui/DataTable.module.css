@@ -1,5 +1,9 @@
+/* Gr8r Studio table: bordered panel, quiet 32px header in text-3, 40px rows split by dividers. */
 .container {
-  background: var(--color-surface);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
   min-width: 0;
 }
 
@@ -7,8 +11,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--space-3);
-  padding: var(--space-5);
+  gap: var(--s-2);
+  padding: var(--s-3) 14px;
+  border-bottom: 1px solid var(--border);
 }
 
 .scroll {
@@ -17,36 +22,44 @@
 }
 
 .scroll:focus-visible {
-  outline: var(--focus-ring);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--text-md);
+  font-size: var(--fs);
 }
 
 .table th {
-  height: 48px;
-  padding: 0 var(--space-5);
-  background: var(--color-selected);
-  color: var(--color-text-primary);
-  font-weight: var(--weight-semibold);
+  height: 34px;
+  padding: 0 10px;
+  background: var(--sunken);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
   text-align: left;
   white-space: nowrap;
 }
 
 .table td {
-  height: 48px;
-  padding: var(--space-3) var(--space-5);
-  border-top: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
+  height: var(--row-h);
+  padding: 6px 10px;
+  border-top: 1px solid var(--divider);
+  color: var(--text);
   vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+  transition: background var(--dur);
+}
+
+.table tbody tr:first-child td {
+  border-top: 0;
 }
 
 .table tbody tr:hover td {
-  background: var(--color-layer-hover);
-  color: var(--color-text-primary);
+  background: var(--surface-2);
 }
 
 .end {
@@ -55,8 +68,8 @@
 
 .message {
   text-align: center;
-  padding: var(--space-7) var(--space-5) !important;
-  color: var(--color-text-secondary);
+  padding: var(--s-12) var(--s-4) !important;
+  color: var(--text-3);
 }
 
 .stale {
@@ -68,6 +81,17 @@
 }
 
 .clickable:focus-visible {
-  outline: var(--focus-ring);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+/* First and last columns keep the 14px panel edge. */
+.table th:first-child,
+.table td:first-child {
+  padding-left: 14px;
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-right: 14px;
 }

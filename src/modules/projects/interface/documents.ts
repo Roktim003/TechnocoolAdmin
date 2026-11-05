@@ -7,6 +7,7 @@ import { storage } from "@/shared/storage/storage";
 import { formatDateTime } from "@/shared/time/format";
 import type { CostStatementQueue } from "../application/ports";
 import { renderCostStatementHtml } from "../infrastructure/cost-statement-template";
+import { isOverhead } from "../domain/types";
 
 /** Job on the shared `documents` queue (inventory's status / download endpoint serves it). */
 export interface CostStatementJob {
@@ -15,6 +16,8 @@ export interface CostStatementJob {
   userId: string;
   userName: string;
   showMargin: boolean;
+  /** Overhead section and full cost (overheads ≥ VIEW + seeCost). Older queued jobs: false. */
+  showOverheads?: boolean;
   fileKey: string;
 }
 
@@ -30,13 +33,16 @@ export const costStatementQueue: CostStatementQueue = {
 };
 
 /** The statement's HTML (also used by tests to check what a role sees). */
-export async function costStatementHtml(data: Pick<CostStatementJob, "projectId" | "userName" | "showMargin">) {
+export async function costStatementHtml(data: Pick<CostStatementJob, "projectId" | "userName" | "showMargin" | "showOverheads">) {
   const { projects } = await import("./container");
   const p = await projects().projects.get(data.projectId);
-  const [summary, material, costs] = await Promise.all([projects().costing.summary(p), projects().costing.material(p.id), projects().uow.store.costs(p.id, { includeVoided: false })]);
+  const [summary, material, all] = await Promise.all([projects().costing.summary(p), projects().costing.material(p.id), projects().uow.store.costs(p.id, { includeVoided: false })]);
+  const showOverheads = data.showOverheads ?? false;
+  // Without overhead access the statement is on direct cost only: no overhead lines at all.
+  const costs = showOverheads ? all : all.filter((c) => !isOverhead(c.category));
   return {
     project: p,
-    html: renderCostStatementHtml(p, { summary, material, costs }, { showMargin: data.showMargin, companyName: process.env.COMPANY_NAME ?? APP_NAME, companyAddress: process.env.COMPANY_ADDRESS ?? null, printedBy: data.userName, printedAt: formatDateTime(new Date()) }),
+    html: renderCostStatementHtml(p, { summary, material, costs }, { showMargin: data.showMargin, showOverheads, companyName: process.env.COMPANY_NAME ?? APP_NAME, companyAddress: process.env.COMPANY_ADDRESS ?? null, printedBy: data.userName, printedAt: formatDateTime(new Date()) }),
   };
 }
 

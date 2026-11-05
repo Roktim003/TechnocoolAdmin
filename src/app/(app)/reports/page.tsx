@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { hasLevel } from "@/shared/rbac/levels";
 import { getWebPrincipal } from "@/modules/identity/interface/web-session";
+import { reporting, viewerOf } from "@/modules/reporting/interface/container";
 import { allowedFor } from "../guard";
 import { ReportsWorkspace } from "./_components/ReportsWorkspace";
 import states from "@/components/shell/PageStates.module.css";
@@ -10,7 +11,8 @@ import states from "@/components/shell/PageStates.module.css";
 export const metadata: Metadata = { title: "Reports" };
 
 const TITLE = "Reports";
-const SUBTITLE = "14 reports with filters, export and scheduled emails · Admin and Accounts only";
+const subtitle = (count?: number) => `${count === undefined ? "Reports" : `${count} reports`} with filters, export and scheduled emails · Admin and Accounts only`;
+const SUBTITLE = subtitle();
 
 export default async function Page() {
   const principal = await allowedFor("/reports");
@@ -33,9 +35,11 @@ export default async function Page() {
       </>
     );
   }
+  // The reports this user may run (the overhead reports need overhead access).
+  const count = reporting().reports.available(viewerOf(principal)).length;
   return (
     <>
-      <PageHeader title={TITLE} description={SUBTITLE} />
+      <PageHeader title={TITLE} description={subtitle(count)} />
       <ReportsWorkspace
         caps={{
           userId: principal.userId,

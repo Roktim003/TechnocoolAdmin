@@ -33,15 +33,24 @@ export const projectsNotifier: ProjectsNotifier = {
     });
   },
 
-  /** Users who may see margins (and open projects). */
-  async costAlert(p, threshold, s) {
+  /**
+   * Users who may see margins (and open projects). Those who can also see overheads
+   * (overheads ≥ VIEW + seeCost) get the full-cost alert; the others the direct-cost one.
+   */
+  async costAlert(p, threshold, s, basis) {
     try {
-      const userIds = await notifications().recipients.withFlag("seeMargin", { module: "projects", level: "VIEW" });
+      const marginUsers = await notifications().recipients.withFlag("seeMargin", { module: "projects", level: "VIEW" });
+      const overheadUsers = new Set(await notifications().recipients.withFlag("seeCost", { module: "overheads", level: "VIEW" }));
+      const userIds = marginUsers.filter((id) => (basis === "full") === overheadUsers.has(id));
+      if (!userIds.length) return;
       await publish({
         type: "PROJECT_COST_ALERT",
         userIds,
         title: threshold >= 100 ? `${p.code} has used its whole contract value` : `${p.code} has used ${threshold}% of its contract value`,
-        body: `${p.name}: total cost ${money(s.totalCost)} is ${s.costUsedPercent}% of the contract value ${money(s.contractValue)}.`,
+        body:
+          basis === "full"
+            ? `${p.name}: full cost (incl. overheads) ${money(s.totalCost)} is ${s.costUsedPercent}% of the contract value ${money(s.contractValue)}.`
+            : `${p.name}: total cost ${money(s.totalCost)} is ${s.costUsedPercent}% of the contract value ${money(s.contractValue)}.`,
         link: `/projects/${p.id}`,
       });
     } catch (err) {

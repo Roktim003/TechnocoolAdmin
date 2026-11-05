@@ -12,7 +12,7 @@ import { createEntry, customer, grn, post, prisma, product, project, userToken, 
 import { approvedPo, customUser } from "../helpers/purchasing";
 
 /**
- * One fixture for all 14 reports (built once): known receipts, a sale, a damage write-off, an
+ * One fixture for reports 1–14 (built once; 15, import shipments, is in import-reports.test.ts): known receipts, a sale, a damage write-off, an
  * issue to a project, a low-stock item, serials, an overdue PO and an entry awaiting approval.
  */
 
@@ -64,10 +64,10 @@ afterAll(async () => {
 const row = (rows: any[], key: string, value: unknown) => rows.find((r) => r[key] === value);
 
 describe("catalog and access", () => {
-  it("lists the 14 reports in order with a schedule count", async () => {
+  it("lists the 17 reports in order with a schedule count (16–17 need overhead access: overhead-reports.test.ts)", async () => {
     const r = await call(catalogRoute.GET, "GET", "/reports", { token });
     expect(r.status).toBe(200);
-    expect(r.body.data.map((x: any) => x.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+    expect(r.body.data.map((x: any) => x.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
     expect(r.body.scheduleCount).toBe(0);
   });
 

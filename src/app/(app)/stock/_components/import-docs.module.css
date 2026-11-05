@@ -1,0 +1,487 @@
+/* GRN (Imported) documents: checklist pills, document boxes, upload area, file list / gallery. */
+
+.headRight {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2) var(--s-3);
+}
+
+/* ── Checklist ── */
+.checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A required document that is still missing: red outline on the gray tag. */
+.requiredMissing > span {
+  border-color: var(--red);
+}
+
+/* ── Document boxes ── */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+  gap: var(--s-4);
+}
+
+.box {
+  min-width: 0;
+  margin: 0;
+  padding: var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+
+.boxRequired {
+  border-color: color-mix(in srgb, var(--red) 35%, var(--border));
+}
+
+/* float + full width keeps the legend inside the box like a normal heading row. */
+.legend {
+  float: left;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  margin-bottom: var(--s-4);
+  padding: 0;
+}
+
+.legend + * {
+  clear: both;
+}
+
+.legendName {
+  color: var(--text);
+  font-size: var(--fs);
+  font-weight: 600;
+}
+
+.code {
+  padding: 0 5px;
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: 18px;
+}
+
+.boxBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.fields,
+.specs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3);
+  margin: 0;
+}
+
+.full {
+  grid-column: 1 / -1;
+}
+
+.specs dt {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.specs dd {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: var(--fs);
+  overflow-wrap: anywhere;
+}
+
+.filesTitle {
+  margin-bottom: var(--s-1);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+/* ── Container numbers (tag input) ── */
+.tagInput {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1);
+  min-height: var(--h-md);
+  padding: 3px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  cursor: text;
+  transition:
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.tagInput:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tagInputInvalid,
+.tagInputInvalid:focus-within {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px var(--red-soft);
+}
+
+.tagChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 2px 0 7px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-badge);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.tagRemove {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tagRemove:hover {
+  background: var(--accent-soft);
+}
+
+.tagRemove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.tagField {
+  flex: 1 1 120px;
+  min-width: 80px;
+  height: 22px;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs);
+  outline: none;
+}
+
+/* ── Upload ── */
+.upload {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: var(--s-4) var(--s-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r);
+  background: var(--sunken);
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color var(--dur),
+    background var(--dur);
+}
+
+.drop:hover,
+.dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.drop:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.dropIcon {
+  margin-bottom: var(--s-1);
+  color: var(--accent);
+}
+
+.dropTitle {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.dropHint {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+/* The camera button only makes sense on phones (two classes: beats the Button's display). */
+.upload .photo {
+  display: none;
+  align-self: flex-start;
+}
+
+.progressList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.progressItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.progressHead {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--dur) linear;
+}
+
+.progressError {
+  color: var(--red);
+  font-size: var(--fs-xs);
+}
+
+/* ── Files ── */
+.empty {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.files {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 0;
+  padding: var(--s-2) 0;
+}
+
+.file + .file {
+  border-top: 1px solid var(--divider);
+}
+
+.preview {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.preview img,
+.cardPreview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fileIcon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+}
+
+.fileText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fileName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileMeta {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.fileActions {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+
+.iconBtn {
+  display: inline-grid;
+  place-items: center;
+  width: var(--h-sm);
+  height: var(--h-sm);
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
+}
+
+.iconBtn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.iconBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.danger:hover {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* Detail page: a gallery of cards (image thumbnails, PDF file cards). */
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--s-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-width: 0;
+  padding: var(--s-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+
+.cardPreview {
+  display: grid;
+  place-items: center;
+  height: 110px;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.card .fileActions {
+  justify-content: flex-end;
+}
+
+/* ── Other documents / warnings ── */
+.other {
+  margin-top: var(--s-4);
+}
+
+.otherTitle {
+  margin-bottom: var(--s-2);
+  color: var(--text);
+  font-size: var(--fs);
+  font-weight: 600;
+}
+
+.note {
+  margin-top: var(--s-4);
+}
+
+.noteList {
+  margin: 0;
+  padding-left: var(--s-5);
+}
+
+/* ── List view: paper-clip count ── */
+.clip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.listChecklist {
+  margin-top: var(--s-1);
+}
+
+@media (max-width: 671px) {
+  .upload .photo {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 420px) {
+  .fields,
+  .specs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

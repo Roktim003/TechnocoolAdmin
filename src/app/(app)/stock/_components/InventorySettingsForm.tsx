@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
-import { TextField, Toggle } from "@/components/ui/Field";
+import { Checkbox, FieldGroup, TextField, Toggle } from "@/components/ui/Field";
 import { Notification } from "@/components/ui/Notification";
 import { api, ApiError, errorMessage } from "@/lib/api-client";
+import { DOC_LABEL, DOC_TYPES, type ImportDocType } from "./import-docs";
 import styles from "./stock.module.css";
 
 export interface SettingsDto {
@@ -12,6 +13,7 @@ export interface SettingsDto {
   adminWriteOffNeedsApproval: boolean;
   allowAdminBelowCostSale: boolean;
   fiscalYearStartMonth: number;
+  importDocsRequiredToPost: ImportDocType[];
 }
 
 export function InventorySettingsForm({ initial }: { initial: SettingsDto }) {
@@ -26,7 +28,12 @@ export function InventorySettingsForm({ initial }: { initial: SettingsDto }) {
     try {
       const r = await api<{ data: SettingsDto }>("/inventory-settings", {
         method: "PATCH",
-        body: { defaultSalesVatPercent: s.defaultSalesVatPercent, adminWriteOffNeedsApproval: s.adminWriteOffNeedsApproval, allowAdminBelowCostSale: s.allowAdminBelowCostSale },
+        body: {
+          defaultSalesVatPercent: s.defaultSalesVatPercent,
+          adminWriteOffNeedsApproval: s.adminWriteOffNeedsApproval,
+          allowAdminBelowCostSale: s.allowAdminBelowCostSale,
+          importDocsRequiredToPost: s.importDocsRequiredToPost,
+        },
       });
       setS(r.data);
       setNotice({ kind: "success", message: "Settings saved." });
@@ -69,6 +76,24 @@ export function InventorySettingsForm({ initial }: { initial: SettingsDto }) {
           checked={s.adminWriteOffNeedsApproval}
           onChange={(v) => setS({ ...s, adminWriteOffNeedsApproval: v })}
         />
+      </section>
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle} style={{ marginBottom: "var(--space-2)" }}>
+          Import documents
+        </h2>
+        <p className={styles.sectionHelp} style={{ marginBottom: "var(--space-5)" }}>
+          A GRN (Imported) can&apos;t be posted or approved until each document ticked here has its number and at least one file.
+        </p>
+        <FieldGroup legend="Required before posting">
+          {DOC_TYPES.map((t) => (
+            <Checkbox
+              key={t}
+              label={`${DOC_LABEL[t]} (${t})`}
+              checked={s.importDocsRequiredToPost.includes(t)}
+              onChange={(e) => setS({ ...s, importDocsRequiredToPost: e.target.checked ? DOC_TYPES.filter((d) => d === t || s.importDocsRequiredToPost.includes(d)) : s.importDocsRequiredToPost.filter((d) => d !== t) })}
+            />
+          ))}
+        </FieldGroup>
       </section>
       <section className={styles.section}>
         <h2 className={styles.sectionTitle} style={{ marginBottom: "var(--space-3)" }}>

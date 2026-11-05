@@ -10,6 +10,7 @@ import "@/modules/inventory/interface/openapi-control";
 import "@/modules/notifications/interface/openapi";
 import "@/modules/purchasing/interface/openapi";
 import "@/modules/projects/interface/openapi";
+import "@/modules/overheads/interface/openapi";
 import "@/modules/reporting/interface/openapi";
 
 registry.registerPath({

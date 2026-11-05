@@ -129,6 +129,16 @@ describe("costs and margin", () => {
       margin: "3000.00",
       marginPercent: "30.00",
       costUsedPercent: "70.00",
+      // Admin can see overheads: none yet, so full cost = direct cost.
+      directCost: "7000.00",
+      storeChargeCost: "0.00",
+      holdingCost: "0.00",
+      establishmentCost: "0.00",
+      overheadCost: "0.00",
+      fullCost: "7000.00",
+      directMargin: "3000.00",
+      directMarginPercent: "30.00",
+      directCostUsedPercent: "70.00",
     });
 
     const v = await voidCost(pr.id, other.id, "Billed to the client");

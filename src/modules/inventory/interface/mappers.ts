@@ -2,6 +2,8 @@ import { hasLevel } from "@/shared/rbac/levels";
 import { d, money } from "../domain/decimal";
 import { CANCELLABLE, EDITABLE } from "../domain/rules";
 import { ENTRY_TYPE_META, priceIsCost } from "../domain/types";
+import { documentsChecklist, IMPORT_DOC_TYPES, type ImportDocType } from "../domain/import-docs";
+import { canEditImportDocs } from "../application/import-docs.service";
 import type { AttachmentRecord, Customer, EntryRecord, InventoryActor, MovementRecord } from "../application/ports";
 import type { EntryService } from "../application/entry.service";
 import { lineVariance, type CountRecord, type CountService, type CountSummary } from "../application/count.service";
@@ -28,6 +30,8 @@ export function entryActions(e: EntryRecord, a: InventoryActor) {
     editLandedCost: e.type === "GRN_IMPORT" && e.status === "PENDING" && inScope && hasLevel(a.level, "APPROVE") && a.canSeeCost,
     /** Pending and created by the viewer: someone else has to verify it. */
     waitingForOtherApprover: e.status === "PENDING" && mine,
+    /** GRN (Imported): change document details and upload document files. */
+    editImportDocs: canEditImportDocs(a, e),
   };
 }
 
@@ -49,7 +53,23 @@ function timeline(e: EntryRecord) {
  * for roles without seeCost; here we also hide prices and totals of entries priced at cost
  * (everything except sales), which share field names with selling prices.
  */
-export function toEntryDto(e: EntryRecord, viewer: InventoryActor) {
+export interface EntryDtoOptions {
+  /** Documents required before posting (inventory setting): adds the documents checklist to GRN (Imported) entries. */
+  requiredDocs?: readonly ImportDocType[];
+}
+
+/** GRN (Imported) document fields of an entry DTO (ciValue is removed without seeCost by the route wrapper). */
+function importFields(e: EntryRecord, opts: EntryDtoOptions) {
+  if (e.type !== "GRN_IMPORT") return {};
+  const docFiles = IMPORT_DOC_TYPES.reduce((n, t) => n + (e.docFileCounts[t] ?? 0), 0) + (e.docFileCounts.OTHER ?? 0);
+  return {
+    importShipment: e.importShipment,
+    importDocFileCount: docFiles,
+    ...(opts.requiredDocs ? { documentsChecklist: documentsChecklist(e.importShipment, e.docFileCounts, opts.requiredDocs) } : {}),
+  };
+}
+
+export function toEntryDto(e: EntryRecord, viewer: InventoryActor, opts: EntryDtoOptions = {}) {
   const hideCost = priceIsCost(e.type) && !viewer.canSeeCost;
   const net = d(e.subtotal).minus(d(e.discountAmount));
   const profit = e.type === "SALE" && ["POSTED", "PENDING"].includes(e.status) ? money(net.minus(d(e.costTotal))).toFixed(2) : null;
@@ -115,11 +135,13 @@ export function toEntryDto(e: EntryRecord, viewer: InventoryActor) {
       receivedQty: l.receivedQty,
       adjustDirection: l.adjustDirection,
       purchaseOrderLineId: l.purchaseOrderLineId,
+      ...(e.type === "GRN_IMPORT" ? { countryOfOrigin: l.countryOfOrigin } : {}),
       note: l.note,
       serials: l.serials.map((s) => ({ serial: s.serial, received: s.received })),
     })),
     charges: e.charges.map((c) => ({ id: c.id, type: c.type, mode: c.mode, includeInCost: c.includeInCost, label: c.label, ...(hideCost ? {} : { value: c.value, amountBdt: c.amountBdt }) })),
     attachmentCount: e.attachmentCount,
+    ...importFields(e, opts),
     createdBy: e.createdBy,
     verifiedBy: e.verifiedBy,
     receivedByUser: e.receivedByUser,
@@ -173,16 +195,29 @@ export function toMovementDto(m: MovementRecord) {
 export const toCustomerDto = (c: Customer) => ({ ...c, createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() });
 
 export function toAttachmentDto(a: AttachmentRecord) {
+  const base = `/api/v1/stock-entries/${a.entityId}/attachments/${a.id}`;
   return {
     id: a.id,
     fileName: a.fileName,
     mimeType: a.mimeType,
     size: a.size,
     label: a.label,
+    docType: a.docType,
     uploadedBy: a.uploadedBy,
     createdAt: a.createdAt.toISOString(),
-    url: `/api/v1/stock-entries/${a.entityId}/attachments/${a.id}`,
+    uploadedAt: a.createdAt.toISOString(),
+    url: base,
+    /** Authenticated download (cookie or bearer); add ?inline=1 to view in the browser. */
+    downloadUrl: `${base}/download`,
+    thumbnailUrl: a.thumbnailKey ? `${base}/download?variant=thumb` : null,
   };
+}
+
+/** Import document files grouped by document type (BL, CO, PL, CI, BOE, OTHER). */
+export function groupAttachments(list: AttachmentRecord[]) {
+  const out: Record<string, ReturnType<typeof toAttachmentDto>[]> = { BL: [], CO: [], PL: [], CI: [], BOE: [], OTHER: [] };
+  for (const a of list) if (a.docType) out[a.docType]!.push(toAttachmentDto(a));
+  return out;
 }
 
 /* ───────────────────────────── stock counts ───────────────────────────── */

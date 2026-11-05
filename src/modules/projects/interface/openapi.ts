@@ -1,6 +1,6 @@
 import { z } from "@/shared/validation/zod";
 import { AUTHENTICATED, dataOf, errors, IdParams, json, listOf, registry } from "@/shared/openapi/registry";
-import { AddCostSchema, ChangeStatusSchema, CostListQuerySchema, CreateProjectSchema, EntriesQuerySchema, ProjectListQuerySchema, ProjectOptionsQuerySchema, UpdateProjectSchema, VoidCostSchema } from "../application/dto";
+import { AddCostSchema, ChangeStatusSchema, CostListQuerySchema, CreateProjectSchema, EntriesQuerySchema, ProjectListQuerySchema, ProjectOptionsQuerySchema, UpdateCostSchema, UpdateProjectSchema, VoidCostSchema } from "../application/dto";
 import { COST_CATEGORIES, PROJECT_STATUSES, PROJECT_TYPES } from "../domain/types";
 
 const body = (schema: z.ZodTypeAny) => ({ body: { required: true, content: { "application/json": { schema } } } });
@@ -36,8 +36,20 @@ const SummaryDto = z.object({
   contractValue: Money.nullable().optional().openapi({ description: "seeMargin" }),
   margin: Money.nullable().optional().openapi({ description: "contract − total cost (seeMargin); null without a contract value" }),
   marginPercent: z.string().nullable().optional().openapi({ description: "margin ÷ contract × 100 (seeMargin)" }),
-  costUsedPercent: z.string().nullable().optional().openapi({ description: "total cost ÷ contract × 100 (seeMargin + seeCost)" }),
+  costUsedPercent: z.string().nullable().optional().openapi({ description: "cost ÷ contract × 100 (seeMargin + seeCost); on full cost with overhead access" }),
+  directCost: Money.optional().openapi({ description: "= totalCost (seeCost)" }),
+  storeChargeCost: Money.optional().openapi({ description: "Overhead access only (overheads ≥ VIEW + seeCost)" }),
+  holdingCost: Money.optional().openapi({ description: "Overhead access only" }),
+  establishmentCost: Money.optional().openapi({ description: "Overhead access only" }),
+  overheadCost: Money.optional().openapi({ description: "store charge + holding + established (overhead access only)" }),
+  fullCost: Money.optional().openapi({ description: "direct cost + overheads (overhead access only)" }),
+  directMargin: Money.nullable().optional().openapi({ description: "contract − direct cost (overhead access + seeMargin). Without overhead access `margin` is already on direct cost." }),
+  directMarginPercent: z.string().nullable().optional(),
+  directCostUsedPercent: z.string().nullable().optional(),
 });
+const OVERHEADS =
+  "Overheads (STORE_CHARGE, HOLDING, ESTABLISHMENT) need overheads ≥ CREATE and seeCost to add, edit or void, at any project status (a `reason` on CLOSED projects); they are hidden (lines, amounts, history) from users without overheads ≥ VIEW + seeCost. LABOUR / TRANSPORT / OTHER keep their rules (projects ≥ CREATE to add, FULL to void, not on closed projects).";
+const CostWarnings = z.array(z.object({ code: z.string(), message: z.string() })).openapi({ description: "Non-blocking: OVERHEAD_LARGE_AMOUNT (> BDT 10,00,000), OVERHEAD_ABOVE_30_PERCENT (overheads > 30 % of direct cost)" });
 
 const ProjectDto = registry.register(
   "Project",
@@ -104,6 +116,13 @@ const CostDto = registry.register(
     amount: Money.optional().openapi({ description: "seeCost only" }),
     vendorOrPayee: z.string().nullable(),
     referenceNo: z.string().nullable(),
+    kind: z.enum(["DIRECT", "OVERHEAD"]),
+    periodFrom: z.string().nullable().optional().openapi({ description: "Overheads only" }),
+    periodTo: z.string().nullable().optional(),
+    basisNote: z.string().nullable().optional(),
+    updatedBy: Ref.nullable().optional(),
+    updatedAt: z.string().optional(),
+    actions: z.object({ edit: z.boolean(), void: z.boolean(), history: z.boolean() }),
     createdBy: Ref,
     voided: z.boolean(),
     voidedAt: z.string().nullable(),
@@ -150,23 +169,55 @@ path("get", "/projects/{id}/activity", "Activity", `${VIEW} Status history and t
 });
 path("get", "/projects/{id}/material", "Material used", `${VIEW} Per product, from posted issues and returns (reversals netted; DAMAGED returns count as returned), at the unit costs recorded in the stock ledger; serial numbers still at the site. Costs with seeCost.`, {
   request: { params: IdParams },
-  responses: { 200: json(dataOf(z.object({ lines: z.array(MaterialDto), totals: z.object({ issuedCost: Money.optional(), returnedCost: Money.optional(), netMaterialCost: Money.optional() }) }))), ...errors(401, 403, 404) },
+  responses: { 200: json(dataOf(z.object({ lines: z.array(MaterialDto), totals: z.object({ issuedCost: Money.optional(), returnedCost: Money.optional(), netMaterialCost: Money.optional() }), summary: SummaryDto }))), ...errors(401, 403, 404) },
 });
 path("get", "/projects/{id}/movements", "Issue / return history", `${VIEW} Issues, returns and their reversals (not drafts). \`costTotal\` with seeCost.`, {
   request: { params: IdParams, query: EntriesQuerySchema.innerType() },
   responses: { 200: json(listOf(MovementDto)), ...errors(400, 401, 403, 404) },
 });
-path("get", "/projects/{id}/costs", "Labour, transport & other costs", `${VIEW} Voided costs only with \`includeVoided=true\`. \`subtotals\`: per category, of non-voided costs (seeCost).`, {
+path("get", "/projects/{id}/costs", "Other costs & overheads", `${VIEW} Voided costs only with \`includeVoided=true\`. \`subtotals\`: per category, of non-voided costs (seeCost; \`costsTotal\` = labour + transport + other; overhead subtotals with overhead access). Overhead lines only with overheads ≥ VIEW + seeCost.`, {
   request: { params: IdParams, query: CostListQuerySchema },
-  responses: { 200: json(dataOf(z.object({ costs: z.array(CostDto), subtotals: z.object({ labourCost: Money, transportCost: Money, otherCost: Money, costsTotal: Money }).partial() }))), ...errors(400, 401, 403, 404) },
+  responses: {
+    200: json(dataOf(z.object({ costs: z.array(CostDto), subtotals: z.object({ labourCost: Money, transportCost: Money, otherCost: Money, costsTotal: Money, storeChargeCost: Money, holdingCost: Money, establishmentCost: Money, overheadCost: Money }).partial() }))),
+    ...errors(400, 401, 403, 404),
+  },
 });
-path("post", "/projects/{id}/costs", "Add a cost", `${CREATE} ${KEY} Not on closed projects (422 PROJECT_CLOSED). Queues the cost-alert check.`, {
+path("post", "/projects/{id}/costs", "Add a cost or an overhead", `Requires \`projects\` ≥ VIEW, plus the category's rule. ${OVERHEADS} ${KEY} Queues the cost-alert check.`, {
   request: { params: IdParams, headers: RequiredKey, ...body(AddCostSchema) },
-  responses: { 201: json(dataOf(CostDto), "Created"), ...errors(400, 401, 403, 404, 422) },
+  responses: { 201: json(dataOf(CostDto.extend({ warnings: CostWarnings })), "Created"), ...errors(400, 401, 403, 404, 422) },
 });
-path("post", "/projects/{id}/costs/{costId}/void", "Void a cost", `${FULL} ${KEY} With a reason; kept for audit and excluded from totals.`, {
+path("patch", "/projects/{id}/costs/{costId}", "Edit an overhead", `Overhead lines only (422 COST_NOT_EDITABLE for labour / transport / other: void and add again). ${OVERHEADS} Omitted fields keep their value; audit-logged with before / after and the reason; project figures update immediately.`, {
+  request: { params: CostParams, ...body(UpdateCostSchema) },
+  responses: { 200: json(dataOf(CostDto.extend({ warnings: CostWarnings }))), ...errors(400, 401, 403, 404, 422) },
+});
+path("post", "/projects/{id}/costs/{costId}/void", "Void a cost", `${KEY} With a reason; kept for audit and excluded from totals. Labour / transport / other: projects FULL, not on closed projects. Overheads: overheads ≥ CREATE + seeCost, any status.`, {
   request: { params: CostParams, headers: RequiredKey, ...body(VoidCostSchema) },
   responses: { 200: json(dataOf(CostDto)), ...errors(400, 401, 403, 404, 422) },
+});
+path("get", "/projects/{id}/costs/{costId}/history", "History of a cost line", `${VIEW} Its audit trail, oldest first: created / edited (old → new) / voided, who, when and why. Overhead lines only with overhead access (404 otherwise).`, {
+  request: { params: CostParams },
+  responses: {
+    200: json(
+      dataOf(
+        z.object({
+          cost: CostDto,
+          history: z.array(
+            z.object({
+              id: z.string().uuid(),
+              action: z.enum(["CREATED", "EDITED", "VOIDED"]),
+              at: z.string(),
+              by: Ref.nullable(),
+              amount: Money.nullable().optional(),
+              amountBefore: Money.nullable().optional(),
+              changes: z.array(z.object({ field: z.string(), from: z.string().nullable(), to: z.string().nullable() })),
+              reason: z.string().nullable(),
+            }),
+          ),
+        }),
+      ),
+    ),
+    ...errors(401, 403, 404),
+  },
 });
 for (const [base, Params, FParams, what] of [
   ["/projects/{id}/attachments", IdParams, FileParams, "Project documents (work order, drawings, handover papers, site photos)"],

@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/ui/Icon";
+import { SkeletonLines } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api-client";
 import { formatDateTime } from "@/shared/time/format";
 import styles from "./NotificationBell.module.css";
@@ -76,9 +78,7 @@ export function NotificationBell() {
   return (
     <div className={styles.wrap} ref={box}>
       <button type="button" className={styles.bell} aria-label={count ? `Notifications, ${count} unread` : "Notifications"} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((o) => !o)}>
-        <svg width="20" height="20" viewBox="0 0 32 32" aria-hidden="true" fill="currentColor">
-          <path d="M28.7 20.3 26 17.6V13a10 10 0 0 0-9-9.9V1h-2v2.1A10 10 0 0 0 6 13v4.6l-2.7 2.7A1 1 0 0 0 3 21v3a1 1 0 0 0 1 1h7v.8a5 5 0 0 0 10 0V25h7a1 1 0 0 0 1-1v-3a1 1 0 0 0-.3-.7ZM19 25.8a3 3 0 0 1-6 0V25h6ZM27 23H5v-1.6l2.7-2.7A1 1 0 0 0 8 18v-5a8 8 0 0 1 16 0v5a1 1 0 0 0 .3.7l2.7 2.7Z" />
-        </svg>
+        <Icon name="bell" size={16} />
         {count ? <span className={styles.badge}>{count > 99 ? "99+" : count}</span> : null}
       </button>
       {open ? (
@@ -90,7 +90,7 @@ export function NotificationBell() {
             </button>
           </div>
           <ul className={styles.list}>
-            {items === null ? <li className={styles.empty}>Loading…</li> : null}
+            {items === null ? <li className={styles.skeleton}><SkeletonLines lines={6} label="Loading notifications" /></li> : null}
             {items?.length === 0 ? <li className={styles.empty}>You&apos;re all caught up.</li> : null}
             {items?.map((n) => (
               <li key={n.id}>

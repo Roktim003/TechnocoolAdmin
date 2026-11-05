@@ -124,7 +124,7 @@ export const stockSummary = defineReport({
 /* ───────────────────────── 2. Stock movement ───────────────────────── */
 
 export const stockMovement = defineReport({
-  meta: { id: "stock-movement", number: 2, title: "Stock movement", group: "Stock", description: "Every posted ledger line in a date range: what came in and went out, with the unit cost and value at posting.", landscape: true },
+  meta: { id: "stock-movement", number: 2, title: "Stock movement", group: "Stock", description: "Every posted ledger line in a date range: what came in and went out, with the unit cost and value at posting (imported GRNs also show their BL and B/E numbers).", landscape: true },
   params: [P.dateFrom(), P.dateTo(), P.warehouse, P.brand, P.category, P.product, { key: "type", label: "Entry type", kind: "select", options: Object.entries(ENTRY_TYPE_TAGS).map(([value, t]) => ({ value, label: t.label })) }],
   sortFields: ["date", "entryNo", "product", "inQty", "outQty"],
   defaultSort: "-date",
@@ -132,6 +132,8 @@ export const stockMovement = defineReport({
     dateCol("date", "Date", { sortKey: "date" }),
     text("entryNo", "Entry no.", { sortKey: "entryNo", link: true, width: 16 }),
     { ...tagCol("type", "Type", ENTRY_TYPE_TAGS), width: 26 },
+    text("blNo", "BL no.", { width: 16 }),
+    text("boeNo", "B/E no.", { width: 16 }),
     text("warehouse", "Warehouse", { width: 10 }),
     text("productCode", "Product code", { sortKey: "product", width: 18 }),
     text("productName", "Product", { width: 30 }),
@@ -159,17 +161,22 @@ export const stockMovement = defineReport({
       JOIN "Warehouse" w ON w.id = m."warehouseId"
       LEFT JOIN "Warehouse" fw ON fw.id = e."warehouseId"
       LEFT JOIN "Warehouse" tw ON tw.id = e."toWarehouseId"
+      LEFT JOIN "ImportShipment" sh ON sh."entryId" = e.id
       WHERE ${cond}`;
     const sort = orderBy(req.sort, { date: sql`m.seq`, entryNo: sql`e.number`, product: sql`p.code`, inQty: sql`GREATEST(m."qtyChange", 0)`, outQty: sql`GREATEST(-m."qtyChange", 0)` }, sql`m.seq DESC`);
-    type Row = { seq: bigint; day: Date; entryId: string; entryNo: string | null; type: string; wcode: string; fcode: string | null; tcode: string | null; code: string; name: string; qtyChange: D; unitCost: D; valueChange: D };
+    type Row = { seq: bigint; day: Date; entryId: string; entryNo: string | null; type: string; wcode: string; fcode: string | null; tcode: string | null; code: string; name: string; qtyChange: D; unitCost: D; valueChange: D; blNo: string | null; boeNo: string | null };
     const rows = await db.$queryRaw<Row[]>`
       SELECT m.seq, ${dhakaDay(sql`m."postedAt"`)} AS day, e.id AS "entryId", e.number AS "entryNo", e.type::text AS type,
-             w.code AS wcode, fw.code AS fcode, tw.code AS tcode, p.code, p.name, m."qtyChange", m."unitCost", m."valueChange"
+             w.code AS wcode, fw.code AS fcode, tw.code AS tcode, p.code, p.name, m."qtyChange", m."unitCost", m."valueChange",
+             sh."blNo", sh."boeNo"
       ${fromSql} ORDER BY ${sort} LIMIT ${req.pageSize} OFFSET ${req.offset}`;
     const out: ReportRow[] = rows.map((r) => ({
       date: isoDate(r.day),
       entryNo: r.entryNo ?? "—",
       type: r.type,
+      // Shipment documents exist only on GRN (Imported) entries: empty on every other row.
+      blNo: r.blNo,
+      boeNo: r.boeNo,
       warehouse: r.type === "TRANSFER" && r.tcode ? `${r.fcode} → ${r.tcode}` : r.wcode,
       productCode: r.code,
       productName: r.name,
@@ -359,7 +366,7 @@ export const lowStock = defineReport({
 /* ───────────────────────── 5. Serial number lookup ───────────────────────── */
 
 export const serialLookup = defineReport({
-  meta: { id: "serial-lookup", number: 5, title: "Serial number lookup", group: "Stock", description: "Find a unit by (part of) its serial number: its status, where it is now (warehouse, project, customer, supplier or written off) and the last entry that moved it.", landscape: false },
+  meta: { id: "serial-lookup", number: 5, title: "Serial number lookup", group: "Stock", description: "Find a unit by (part of) its serial number: its status, where it is now (warehouse, project, customer, supplier or written off), the last entry that moved it, and the B/E no. and country of origin of the GRN it came in on.", landscape: true },
   params: [P.q("Serial number (part of it is enough)", "Serial"), { key: "status", label: "Status", kind: "select", options: Object.entries(SERIAL_STATUS_TAGS).map(([value, t]) => ({ value, label: t.label })) }, P.warehouse, P.product],
   sortFields: ["serial", "product", "date"],
   defaultSort: "serial",
@@ -371,6 +378,8 @@ export const serialLookup = defineReport({
     text("location", "Current location", { width: 30 }),
     text("lastEntry", "Last entry", { link: true, width: 16 }),
     dateCol("lastDate", "Date", { sortKey: "date" }),
+    text("boeNo", "B/E no.", { link: true, width: 16 }),
+    text("countryOfOrigin", "Origin", { width: 14 }),
   ],
   totals: [countTotal("serials", "Serial numbers")],
   rowAction: { kind: "link", label: "Serial history" },
@@ -403,6 +412,19 @@ export const serialLookup = defineReport({
       SELECT s.id, s.serial, p.code, p.name, s.status::text AS status, w.name AS wname, fw.code AS fcode, tw.code AS tcode,
              pr.code AS prcode, pr.name AS prname, cu.name AS cuname, su.name AS suname, e.id AS "entryId", e.number AS "entryNo", lm.at
       ${fromSql} ORDER BY ${sort} LIMIT ${req.pageSize} OFFSET ${req.offset}`;
+    // The posted GRN each serial (of this page) came in on: its B/E no. and the line's origin, else the CO's country.
+    type Grn = { serialId: string; entryId: string; boeNo: string | null; origin: string | null };
+    const grns = rows.length
+      ? await db.$queryRaw<Grn[]>`
+          SELECT DISTINCT ON (els."serialId") els."serialId", ge.id AS "entryId", sh."boeNo", COALESCE(gl."countryOfOrigin", sh."countryOfOrigin") AS origin
+          FROM "EntryLineSerial" els
+          JOIN "StockEntryLine" gl ON gl.id = els."lineId"
+          JOIN "StockEntry" ge ON ge.id = gl."entryId"
+          LEFT JOIN "ImportShipment" sh ON sh."entryId" = ge.id
+          WHERE els."serialId" = ANY(${uuidArray(rows.map((r) => r.id))}) AND ge.type IN ('GRN_IMPORT', 'GRN_LOCAL') AND ge.status = 'POSTED'
+          ORDER BY els."serialId", ge."postedAt" DESC NULLS LAST`
+      : [];
+    const grnOf = new Map(grns.map((g) => [g.serialId, g]));
     const location = (r: Row) => {
       switch (r.status) {
         case "ISSUED":
@@ -419,16 +441,26 @@ export const serialLookup = defineReport({
           return r.wname ?? "—";
       }
     };
-    const out: ReportRow[] = rows.map((r) => ({
-      serial: r.serial,
-      productCode: r.code,
-      productName: r.name,
-      status: r.status,
-      location: location(r),
-      lastEntry: r.entryNo ?? "—",
-      lastDate: r.at ? isoDate(new Date(r.at.getTime() + 6 * 3600_000)) : null,
-      _links: { serial: `/serials?q=${encodeURIComponent(r.serial)}`, ...(r.entryId ? { lastEntry: `/stock/${r.entryId}` } : {}), _action: `/serials?q=${encodeURIComponent(r.serial)}` },
-    }));
+    const out: ReportRow[] = rows.map((r) => {
+      const g = grnOf.get(r.id);
+      return {
+        serial: r.serial,
+        productCode: r.code,
+        productName: r.name,
+        status: r.status,
+        location: location(r),
+        lastEntry: r.entryNo ?? "—",
+        lastDate: r.at ? isoDate(new Date(r.at.getTime() + 6 * 3600_000)) : null,
+        boeNo: g?.boeNo ?? null,
+        countryOfOrigin: g?.origin ?? null,
+        _links: {
+          serial: `/serials?q=${encodeURIComponent(r.serial)}`,
+          ...(r.entryId ? { lastEntry: `/stock/${r.entryId}` } : {}),
+          ...(g?.boeNo ? { boeNo: `/stock/${g.entryId}` } : {}),
+          _action: `/serials?q=${encodeURIComponent(r.serial)}`,
+        },
+      };
+    });
     if (!req.summary) return rowsOnly(out);
     const [s] = await db.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*) AS n ${fromSql}`;
     return { rows: out, total: int(s?.n), totals: { serials: int(s?.n) }, chart: null };

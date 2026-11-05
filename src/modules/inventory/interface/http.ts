@@ -4,6 +4,8 @@ import { pageMeta } from "@/shared/pagination/list-query";
 import { UuidSchema, type z } from "@/shared/validation/zod";
 import {
   ApproveSchema,
+  AttachmentDocTypeSchema,
+  AttachmentListQuerySchema,
   AvailabilityQuerySchema,
   BalanceListQuerySchema,
   CalculateEntrySchema,
@@ -12,20 +14,22 @@ import {
   CustomerListQuerySchema,
   DocumentRequestSchema,
   EntryListQuerySchema,
+  ImportShipmentSchema,
   LandedCostSchema,
   MovementListQuerySchema,
   ReasonSchema,
   ReceiveSchema,
+  RemoveAttachmentSchema,
   SerialListQuerySchema,
   UpdateCustomerSchema,
   UpdateEntrySchema,
   UpdateSettingsSchema,
 } from "../application/dto";
 import type { Principal } from "@/shared/auth/principal";
-import type { InventoryActor } from "../application/ports";
+import type { EntryRecord, InventoryActor } from "../application/ports";
 import { inventory } from "./container";
 import { documentFile, documentStatus, enqueueDocument } from "./documents";
-import { toAttachmentDto, toCalculationDto, toCustomerDto, toEntryDto, toMovementDto } from "./mappers";
+import { groupAttachments, toAttachmentDto, toCalculationDto, toCustomerDto, toEntryDto, toMovementDto } from "./mappers";
 
 /* Thin HTTP adapters: parse + validate → call the service → map. */
 
@@ -66,7 +70,26 @@ async function optionalBody<S extends z.ZodTypeAny>(ctx: BaseContext<unknown>, s
   return (await ctx.text()).trim() ? ctx.body(schema) : schema.parse({});
 }
 
-const entry = async (ctx: AuthedContext<unknown>, entryId: string) => toEntryDto(await inventory().entries.get(actorOf(ctx), entryId), actorOf(ctx));
+/**
+ * Entry detail. GRN (Imported) also gets its documents checklist, the import document files
+ * grouped by document type, and the import warnings. Also used by the server-rendered entry pages.
+ */
+export async function entryDetail(a: InventoryActor, entryId: string) {
+  const e = await inventory().entries.get(a, entryId);
+  if (e.type !== "GRN_IMPORT") return toEntryDto(e, a);
+  const docs = inventory().importDocs;
+  const required = await docs.required();
+  const files = await inventory().attachments.list(a, entryId);
+  const importWarnings = await docs.warnings(inventory().uow.store, e.importShipment, { id: e.id, currency: e.currency, lines: e.lines });
+  return { ...toEntryDto(e, a, { requiredDocs: required }), importDocsRequiredToPost: required, importAttachments: groupAttachments(files), importWarnings };
+}
+
+const entry = (ctx: AuthedContext<unknown>, entryId: string) => entryDetail(actorOf(ctx), entryId);
+
+/** One entry after a write: GRN (Imported) gets its documents checklist. */
+async function entryDto(e: EntryRecord, a: InventoryActor) {
+  return toEntryDto(e, a, e.type === "GRN_IMPORT" ? { requiredDocs: await inventory().importDocs.required() } : {});
+}
 
 /* ─────────────── stock entries ─────────────── */
 
@@ -75,14 +98,15 @@ export const entryHandlers = {
     const query = ctx.query(EntryListQuerySchema);
     const a = actorOf(ctx);
     const { items, total } = await inventory().entries.list(a, query);
-    return { data: items.map((e) => toEntryDto(e, a)), meta: pageMeta(total, query.page, query.pageSize) };
+    const requiredDocs = items.some((e) => e.type === "GRN_IMPORT") ? await inventory().importDocs.required() : undefined;
+    return { data: items.map((e) => toEntryDto(e, a, { requiredDocs })), meta: pageMeta(total, query.page, query.pageSize) };
   }),
 
   create: authedRoute(STOCK("CREATE"), async (ctx) => {
     const input = await ctx.body(CreateEntrySchema);
     const a = actorOf(ctx);
     const e = await inventory().entries.create(a, input);
-    return { status: 201, data: toEntryDto(e, a), headers: { Location: `/api/v1/stock-entries/${e.id}` } };
+    return { status: 201, data: await entryDto(e, a), headers: { Location: `/api/v1/stock-entries/${e.id}` } };
   }),
 
   calculate: authedRoute({ ...CREATE, idempotent: false }, async (ctx) => {
@@ -96,40 +120,40 @@ export const entryHandlers = {
   update: authedRoute<IdParams>(CREATE, async (ctx) => {
     const entryId = id(ctx);
     const a = actorOf(ctx);
-    return { data: toEntryDto(await inventory().entries.update(a, entryId, await ctx.body(UpdateEntrySchema)), a) };
+    return { data: await entryDto(await inventory().entries.update(a, entryId, await ctx.body(UpdateEntrySchema)), a) };
   }),
 
   submit: authedRoute<IdParams>(STOCK("CREATE"), async (ctx) => {
     const entryId = id(ctx);
     const body = await optionalBody(ctx, ApproveSchema);
     const a = actorOf(ctx);
-    return { data: toEntryDto(await inventory().entries.submit(a, entryId, body.confirmBelowCost), a) };
+    return { data: await entryDto(await inventory().entries.submit(a, entryId, body.confirmBelowCost), a) };
   }),
 
   post: authedRoute<IdParams>(STOCK("FULL"), async (ctx) => {
     const entryId = id(ctx);
     const body = await optionalBody(ctx, ApproveSchema);
     const a = actorOf(ctx);
-    return { data: toEntryDto(await inventory().entries.postDraft(a, entryId, body.confirmBelowCost), a) };
+    return { data: await entryDto(await inventory().entries.postDraft(a, entryId, body.confirmBelowCost), a) };
   }),
 
   approve: authedRoute<IdParams>(STOCK("APPROVE"), async (ctx) => {
     const entryId = id(ctx);
     const body = await optionalBody(ctx, ApproveSchema);
     const a = actorOf(ctx);
-    return { data: toEntryDto(await inventory().entries.approve(a, entryId, body.confirmBelowCost), a) };
+    return { data: await entryDto(await inventory().entries.approve(a, entryId, body.confirmBelowCost), a) };
   }),
 
   reject: authedRoute<IdParams>(STOCK("APPROVE"), async (ctx) => {
     const entryId = id(ctx);
     const { reason } = await ctx.body(ReasonSchema);
     const a = actorOf(ctx);
-    return { data: toEntryDto(await inventory().entries.reject(a, entryId, reason), a) };
+    return { data: await entryDto(await inventory().entries.reject(a, entryId, reason), a) };
   }),
 
   cancel: authedRoute<IdParams>(CREATE, async (ctx) => {
     const a = actorOf(ctx);
-    return { data: toEntryDto(await inventory().entries.cancel(a, id(ctx)), a) };
+    return { data: await entryDto(await inventory().entries.cancel(a, id(ctx)), a) };
   }),
 
   reverse: authedRoute<IdParams>(STOCK("FULL"), async (ctx) => {
@@ -137,7 +161,7 @@ export const entryHandlers = {
     const { reason } = await ctx.body(ReasonSchema);
     const a = actorOf(ctx);
     const r = await inventory().entries.reverse(a, entryId, reason);
-    return { data: { original: toEntryDto(r.original, a), reversal: toEntryDto(r.reversal, a) } };
+    return { data: { original: await entryDto(r.original, a), reversal: await entryDto(r.reversal, a) } };
   }),
 
   receive: authedRoute<IdParams>(STOCK("CREATE"), async (ctx) => {
@@ -153,11 +177,24 @@ export const entryHandlers = {
     const entryId = id(ctx);
     const input = await ctx.body(LandedCostSchema);
     const a = actorOf(ctx);
-    return { data: toEntryDto(await inventory().entries.updateLandedCost(a, entryId, input), a) };
+    return { data: await entryDto(await inventory().entries.updateLandedCost(a, entryId, input), a) };
+  }),
+
+  /** GRN (Imported): document details (creator / verifier / FULL rules; never changes stock or costs). */
+  importShipment: authedRoute<IdParams>(CREATE, async (ctx) => {
+    const entryId = id(ctx);
+    const input = await ctx.body(ImportShipmentSchema);
+    const a = actorOf(ctx);
+    await inventory().importDocs.update(a, entryId, input);
+    return { data: await entryDetail(a, entryId) };
   }),
 
   /* attachments */
-  listAttachments: authedRoute<IdParams>(VIEW, async (ctx) => ({ data: (await inventory().attachments.list(actorOf(ctx), id(ctx))).map(toAttachmentDto) })),
+  listAttachments: authedRoute<IdParams>(VIEW, async (ctx) => {
+    const entryId = id(ctx);
+    const { docType } = ctx.query(AttachmentListQuerySchema);
+    return { data: (await inventory().attachments.list(actorOf(ctx), entryId, docType)).map(toAttachmentDto) };
+  }),
 
   addAttachments: authedRoute<IdParams>({ permission: ["inventory", "CREATE"], idempotent: false }, async (ctx) => {
     const entryId = id(ctx);
@@ -168,7 +205,22 @@ export const entryHandlers = {
         .map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })),
     );
     const label = typeof form.get("label") === "string" ? String(form.get("label")).slice(0, 100) || null : null;
-    return { status: 201, data: (await inventory().attachments.upload(actorOf(ctx), entryId, files, label)).map(toAttachmentDto) };
+    const rawDocType = form.get("docType");
+    let docType = null;
+    if (typeof rawDocType === "string" && rawDocType.trim()) {
+      const parsed = AttachmentDocTypeSchema.safeParse(rawDocType);
+      if (!parsed.success) throw new ValidationError("Unknown document type.", [{ path: "docType", message: "Use BL, CO, PL, CI, BOE or OTHER.", code: "INVALID_DOC_TYPE" }]);
+      docType = parsed.data;
+    }
+    return { status: 201, data: (await inventory().attachments.upload(actorOf(ctx), entryId, files, label, docType)).map(toAttachmentDto) };
+  }),
+
+  /** Streams the file through this authenticated route (never a public URL). ?variant=thumb, ?inline=1. */
+  downloadAttachment: authedRoute<{ id: string; attachmentId: string }>(VIEW, async (ctx) => {
+    const sp = ctx.req.nextUrl.searchParams;
+    const variant = sp.get("variant") === "thumb" ? "thumb" : "original";
+    const f = await inventory().attachments.file(actorOf(ctx), uuid(ctx.params.id, "Stock entry"), uuid(ctx.params.attachmentId, "Attachment"), variant);
+    return { file: { body: f.body, contentType: f.mimeType, filename: f.fileName, inline: variant === "thumb" || sp.get("inline") === "1", cacheSeconds: 300 } };
   }),
 
   attachmentFile: authedRoute<{ id: string; attachmentId: string }>(VIEW, async (ctx) => {
@@ -177,7 +229,13 @@ export const entryHandlers = {
   }),
 
   removeAttachment: authedRoute<{ id: string; attachmentId: string }>(CREATE, async (ctx) => {
-    await inventory().attachments.remove(actorOf(ctx), uuid(ctx.params.id, "Stock entry"), uuid(ctx.params.attachmentId, "Attachment"));
+    const entryId = uuid(ctx.params.id, "Stock entry");
+    const attachmentId = uuid(ctx.params.attachmentId, "Attachment");
+    // The reason (posted entries) comes as a JSON body or ?reason=.
+    const body = await optionalBody(ctx, RemoveAttachmentSchema);
+    const reason = body.reason ?? (ctx.req.nextUrl.searchParams.get("reason")?.trim() || null);
+    if (reason !== null && reason.length < 3) throw new ValidationError("Give a reason (at least 3 characters).", [{ path: "reason", message: "Give a reason (at least 3 characters)." }]);
+    await inventory().attachments.remove(actorOf(ctx), entryId, attachmentId, reason ? reason.slice(0, 500) : null);
     return { status: 204 };
   }),
 

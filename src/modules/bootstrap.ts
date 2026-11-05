@@ -15,7 +15,8 @@ const clearDashboardCache = () => reporting().dashboard.clearCache();
  *    the posting transaction;
  *  - projects registers its ProjectStockListener: posted / reversed issues and returns queue
  *    the project's cost-alert check;
- *  - reporting clears the cached dashboard when postings, purchasing or projects change data.
+ *  - reporting clears the cached dashboard when postings, purchasing, projects or the overhead
+ *    register change data (every change topic, incl. "overheads").
  * Idempotent. Called by src/instrumentation.ts (web), the worker and the test setup.
  */
 export function wireModules(): void {

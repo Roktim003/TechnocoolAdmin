@@ -6,6 +6,7 @@ import { dateRangeWhere } from "@/shared/time/dates";
 import { AuditService } from "@/modules/audit/application/audit.service";
 import { prismaAuditRepository } from "@/modules/audit/infrastructure/prisma-audit.repository";
 import type { EntryFilters, MasterFilters } from "../application/dto";
+import { normalizeContainers, type AttachmentDocType, type DuplicateDoc, type ImportShipmentData } from "../domain/import-docs";
 import { balanceKey, sortKeys, type BalanceKey, type BalanceRow, type EntryRecord, type InventoryStore, type InventoryUnitOfWork, type MovementRecord, type StockLevelRow } from "../application/ports";
 import { prismaCountStore } from "./prisma-count.store";
 import { prismaOpeningStore } from "./prisma-opening.store";
@@ -46,11 +47,57 @@ const entryInclude = {
     },
   },
   charges: { orderBy: { sortOrder: "asc" } },
+  importShipment: true,
 } satisfies Prisma.StockEntryInclude;
 
 type EntryRow = Prisma.StockEntryGetPayload<{ include: typeof entryInclude }>;
 
-function toEntry(r: EntryRow, attachmentCount: number): EntryRecord {
+type ShipmentRow = NonNullable<EntryRow["importShipment"]>;
+const optDate = (v: Date | null) => (v ? dateOnly(v) : null);
+
+export function toShipment(s: ShipmentRow | null): ImportShipmentData | null {
+  if (!s) return null;
+  return {
+    blNo: s.blNo,
+    blDate: optDate(s.blDate),
+    shippingLine: s.shippingLine,
+    vesselVoyage: s.vesselVoyage,
+    portOfLoading: s.portOfLoading,
+    portOfDischarge: s.portOfDischarge,
+    containerNumbers: s.containerNumbers,
+    coNo: s.coNo,
+    coDate: optDate(s.coDate),
+    countryOfOrigin: s.countryOfOrigin,
+    coIssuingAuthority: s.coIssuingAuthority,
+    plNo: s.plNo,
+    plDate: optDate(s.plDate),
+    packageCount: s.packageCount,
+    grossWeightKg: s.grossWeightKg ? q3(s.grossWeightKg) : null,
+    netWeightKg: s.netWeightKg ? q3(s.netWeightKg) : null,
+    ciNo: s.ciNo,
+    ciDate: optDate(s.ciDate),
+    ciCurrency: s.ciCurrency,
+    ciValue: s.ciValue ? m2(s.ciValue) : null,
+    incoterm: s.incoterm,
+    boeNo: s.boeNo,
+    boeDate: optDate(s.boeDate),
+    customsStation: s.customsStation,
+  };
+}
+
+const shipmentData = (d: ImportShipmentData) => ({
+  ...d,
+  containerNumbers: normalizeContainers(d.containerNumbers),
+  blDate: d.blDate ? asDate(d.blDate) : null,
+  coDate: d.coDate ? asDate(d.coDate) : null,
+  plDate: d.plDate ? asDate(d.plDate) : null,
+  ciDate: d.ciDate ? asDate(d.ciDate) : null,
+  boeDate: d.boeDate ? asDate(d.boeDate) : null,
+});
+
+type DocCounts = Partial<Record<AttachmentDocType, number>>;
+
+function toEntry(r: EntryRow, attachmentCount: number, docFileCounts: DocCounts = {}): EntryRecord {
   return {
     id: r.id,
     number: r.number,
@@ -73,7 +120,7 @@ function toEntry(r: EntryRow, attachmentCount: number): EntryRecord {
     poNumberText: r.poNumberText,
     supplierInvoiceNo: r.supplierInvoiceNo,
     lcNo: r.lcNo,
-    billOfEntryNo: r.billOfEntryNo,
+    billOfEntryNo: r.importShipment?.boeNo ?? null,
     challanNo: r.challanNo,
     siteAddress: r.siteAddress,
     receivedBy: r.receivedBy,
@@ -107,6 +154,8 @@ function toEntry(r: EntryRow, attachmentCount: number): EntryRecord {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     attachmentCount,
+    importShipment: toShipment(r.importShipment),
+    docFileCounts,
     lines: r.lines.map((l) => ({
       id: l.id,
       lineNo: l.lineNo,
@@ -123,6 +172,7 @@ function toEntry(r: EntryRow, attachmentCount: number): EntryRecord {
       receivedQty: l.receivedQty ? q3(l.receivedQty) : null,
       adjustDirection: l.adjustDirection,
       purchaseOrderLineId: l.purchaseOrderLineId,
+      countryOfOrigin: l.countryOfOrigin,
       note: l.note,
       serials: l.serials.map((s) => ({ serial: s.serial, serialId: s.serialId, received: s.received })),
     })),
@@ -131,7 +181,7 @@ function toEntry(r: EntryRow, attachmentCount: number): EntryRecord {
 }
 
 function entryData(w: Parameters<InventoryStore["replaceEntry"]>[1]) {
-  const { lines: _l, charges: _c, entryDate, ...rest } = w;
+  const { lines: _l, charges: _c, entryDate, billOfEntryNo: _b, importShipment: _s, ...rest } = w;
   return { ...rest, entryDate: asDate(entryDate) };
 }
 
@@ -145,6 +195,7 @@ const linesCreate = (lines: Parameters<InventoryStore["replaceEntry"]>[1]["lines
     originalLineId: l.originalLineId,
     adjustDirection: l.adjustDirection ?? null,
     purchaseOrderLineId: l.purchaseOrderLineId ?? null,
+    countryOfOrigin: l.countryOfOrigin ?? null,
     note: l.note,
     serials: { create: [...new Set(l.serials)].map((serial) => ({ serial })) },
   }));
@@ -161,11 +212,32 @@ function masterWhere(q: ListQuery<MasterFilters>, searchFields: string[]) {
 /* ─────────────── the store ─────────────── */
 
 export function prismaInventoryStore(db: Db): InventoryStore {
+  /** Attachment counts per entry: total and per import document type. */
+  const fileCounts = async (ids: string[]) => {
+    const out = new Map<string, { total: number; byDoc: DocCounts }>();
+    if (!ids.length) return out;
+    const rows = await db.attachment.groupBy({ by: ["entityId", "docType"], where: { entityType: "StockEntry", entityId: { in: ids } }, _count: { _all: true } });
+    for (const r of rows) {
+      const c = out.get(r.entityId) ?? { total: 0, byDoc: {} };
+      c.total += r._count._all;
+      if (r.docType) c.byDoc[r.docType] = r._count._all;
+      out.set(r.entityId, c);
+    }
+    return out;
+  };
   const loadEntry = async (id: string) => {
     const r = await db.stockEntry.findUnique({ where: { id }, include: entryInclude });
     if (!r) return null;
-    const count = await db.attachment.count({ where: { entityType: "StockEntry", entityId: id } });
-    return toEntry(r, count);
+    const c = (await fileCounts([id])).get(id);
+    return toEntry(r, c?.total ?? 0, c?.byDoc ?? {});
+  };
+  /** Shipment documents of a create / replace; a legacy billOfEntryNo fills an empty boeNo. */
+  const writeShipment = async (entryId: string, w: Parameters<InventoryStore["replaceEntry"]>[1]) => {
+    if (w.importShipment) {
+      await store.saveImportShipment(entryId, { ...w.importShipment, boeNo: w.importShipment.boeNo ?? w.billOfEntryNo ?? null });
+    } else if (w.billOfEntryNo) {
+      await db.importShipment.upsert({ where: { entryId }, create: { entryId, boeNo: w.billOfEntryNo }, update: { boeNo: w.billOfEntryNo } });
+    }
   };
 
   const store: InventoryStore = {
@@ -177,7 +249,13 @@ export function prismaInventoryStore(db: Db): InventoryStore {
     /* ── reference data ── */
     async settings() {
       const s = await db.inventorySettings.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
-      return { defaultSalesVatPercent: s.defaultSalesVatPercent.toFixed(2), adminWriteOffNeedsApproval: s.adminWriteOffNeedsApproval, allowAdminBelowCostSale: s.allowAdminBelowCostSale, fiscalYearStartMonth: s.fiscalYearStartMonth };
+      return {
+        defaultSalesVatPercent: s.defaultSalesVatPercent.toFixed(2),
+        adminWriteOffNeedsApproval: s.adminWriteOffNeedsApproval,
+        allowAdminBelowCostSale: s.allowAdminBelowCostSale,
+        fiscalYearStartMonth: s.fiscalYearStartMonth,
+        importDocsRequiredToPost: s.importDocsRequiredToPost.filter((t): t is Exclude<typeof t, "OTHER"> => t !== "OTHER"),
+      };
     },
     async updateSettings(data) {
       await db.inventorySettings.upsert({ where: { id: 1 }, create: { id: 1, ...data }, update: data });
@@ -187,7 +265,7 @@ export function prismaInventoryStore(db: Db): InventoryStore {
     warehouses: (ids) => db.warehouse.findMany({ where: ids ? { id: { in: ids } } : {}, select: { id: true, code: true, name: true, isActive: true }, orderBy: { code: "asc" } }),
     async products(ids) {
       if (!ids.length) return [];
-      const rows = await db.product.findMany({ where: { id: { in: [...new Set(ids)] } }, select: { id: true, code: true, name: true, trackSerial: true, status: true, sellingPrice: true } });
+      const rows = await db.product.findMany({ where: { id: { in: [...new Set(ids)] } }, select: { id: true, code: true, name: true, trackSerial: true, status: true, sellingPrice: true, countryOfOrigin: true } });
       return rows.map((p) => ({ ...p, sellingPrice: m2(p.sellingPrice) }));
     },
 
@@ -236,9 +314,24 @@ export function prismaInventoryStore(db: Db): InventoryStore {
       if (range) and.push({ entryDate: range });
       if (f.awaitingMyApproval) and.push(scope.awaitingApprovalFor ? { status: "PENDING", createdById: { not: scope.awaitingApprovalFor }, warehouseId: { in: scope.warehouseIds } } : { id: { in: [] } });
       if (scope.awaitingReceiptFor) and.push({ status: "DISPATCHED", toWarehouseId: { in: scope.awaitingReceiptFor } });
+      const ci = (v: string) => ({ contains: v, mode: "insensitive" as const });
+      if (f.blNo) and.push({ importShipment: { is: { blNo: ci(f.blNo) } } });
+      if (f.ciNo) and.push({ importShipment: { is: { ciNo: ci(f.ciNo) } } });
+      if (f.boeNo) and.push({ importShipment: { is: { boeNo: ci(f.boeNo) } } });
+      if (f.containerNo) and.push({ importShipment: { is: { containerNumbers: { has: normalizeContainers([f.containerNo])[0] ?? "" } } } });
+      if (f.countryOfOrigin) {
+        const eq = { equals: f.countryOfOrigin, mode: "insensitive" as const };
+        and.push({ OR: [{ importShipment: { is: { countryOfOrigin: eq } } }, { lines: { some: { countryOfOrigin: eq } } }] });
+      }
       if (q.q) {
+        const text = q.q;
         and.push({
-          OR: ["number", "draftRef", "poNumberText", "supplierInvoiceNo", "challanNo", "lcNo", "billOfEntryNo"].map((k) => ({ [k]: { contains: q.q, mode: "insensitive" } })),
+          OR: [
+            ...["number", "draftRef", "poNumberText", "supplierInvoiceNo", "challanNo", "lcNo"].map((k) => ({ [k]: ci(text) })),
+            // import documents: BL, CI, B/E (and CO / PL) numbers, container numbers
+            ...["blNo", "ciNo", "boeNo", "coNo", "plNo"].map((k) => ({ importShipment: { is: { [k]: ci(text) } } })),
+            { importShipment: { is: { containerNumbers: { has: normalizeContainers([text])[0] ?? "" } } } },
+          ] as Prisma.StockEntryWhereInput[],
         });
       }
       const where: Prisma.StockEntryWhereInput = { AND: and };
@@ -246,11 +339,8 @@ export function prismaInventoryStore(db: Db): InventoryStore {
         db.stockEntry.findMany({ where, include: entryInclude, orderBy: [...toOrderBy(q.sort), { id: "asc" }] as Prisma.StockEntryOrderByWithRelationInput[], skip: q.skip, take: q.take }),
         db.stockEntry.count({ where }),
       ]);
-      const counts = rows.length
-        ? await db.attachment.groupBy({ by: ["entityId"], where: { entityType: "StockEntry", entityId: { in: rows.map((r) => r.id) } }, _count: { _all: true } })
-        : [];
-      const byId = new Map(counts.map((c) => [c.entityId, c._count._all]));
-      return { items: rows.map((r) => toEntry(r, byId.get(r.id) ?? 0)), total };
+      const counts = await fileCounts(rows.map((r) => r.id));
+      return { items: rows.map((r) => toEntry(r, counts.get(r.id)?.total ?? 0, counts.get(r.id)?.byDoc ?? {})), total };
     },
     async createEntry(data) {
       const { lines, charges, draftRef, status, createdById, reversalOfId, relatedEntryId } = data;
@@ -267,6 +357,7 @@ export function prismaInventoryStore(db: Db): InventoryStore {
         } as Prisma.StockEntryUncheckedCreateInput,
         select: { id: true },
       });
+      await writeShipment(created.id, data);
       return created.id;
     },
     async replaceEntry(id, data) {
@@ -276,6 +367,7 @@ export function prismaInventoryStore(db: Db): InventoryStore {
         where: { id },
         data: { ...entryData(data), lines: { create: linesCreate(data.lines) }, charges: { create: chargesCreate(data.charges) } } as Prisma.StockEntryUncheckedUpdateInput,
       });
+      await writeShipment(id, data);
     },
     async updateEntry(id, data) {
       await db.stockEntry.update({ where: { id }, data: data as Prisma.StockEntryUncheckedUpdateInput });
@@ -591,6 +683,28 @@ export function prismaInventoryStore(db: Db): InventoryStore {
     attachments: (entityType, entityId) => db.attachment.findMany({ where: { entityType, entityId }, include: { uploadedBy: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
     attachment: (id) => db.attachment.findUnique({ where: { id }, include: { uploadedBy: { select: { id: true, name: true } } } }),
     addAttachment: (data) => db.attachment.create({ data, include: { uploadedBy: { select: { id: true, name: true } } } }),
+    async saveImportShipment(entryId, data) {
+      const row = shipmentData(data);
+      await db.importShipment.upsert({ where: { entryId }, create: { entryId, ...row }, update: row });
+    },
+    async importDuplicates(values, exceptEntryId) {
+      const out: DuplicateDoc[] = [];
+      for (const field of ["blNo", "ciNo", "boeNo"] as const) {
+        const value = values[field]?.trim();
+        if (!value) continue;
+        const rows = await db.importShipment.findMany({
+          where: {
+            [field]: { equals: value, mode: "insensitive" },
+            entry: { type: "GRN_IMPORT", status: { not: "CANCELLED" }, ...(exceptEntryId ? { id: { not: exceptEntryId } } : {}) },
+          },
+          select: { entry: { select: { id: true, number: true, draftRef: true } } },
+          orderBy: { createdAt: "asc" },
+          take: 5,
+        });
+        for (const r of rows) out.push({ field, value, entryId: r.entry.id, number: r.entry.number ?? r.entry.draftRef });
+      }
+      return out;
+    },
     async deleteAttachment(id) {
       await db.attachment.delete({ where: { id } });
     },

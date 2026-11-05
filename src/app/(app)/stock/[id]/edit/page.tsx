@@ -20,7 +20,7 @@ export default async function EditEntryPage({ params }: { params: Promise<{ id: 
   return (
     <>
       <PageHeader title={`Edit ${entry.displayNumber}`} description={entry.typeLabel} />
-      <EntryForm caps={ctx.caps} warehouses={warehouses} entry={entry} defaultVat={settings.defaultSalesVatPercent} />
+      <EntryForm caps={ctx.caps} warehouses={warehouses} entry={entry} defaultVat={settings.defaultSalesVatPercent} requiredDocs={settings.importDocsRequiredToPost} />
     </>
   );
 }

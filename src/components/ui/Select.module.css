@@ -1,0 +1,217 @@
+/* Gr8r Studio select: input-styled trigger + popover menu (r-lg, shadow-pop, 30px items, check on the selected one). */
+.wrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+/* The real <select>: kept for value / forms, hidden from view and from the tab order. */
+.native {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* Base trigger look; Field / Pagination / table-cell classes layer their own sizing on top. */
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: var(--h-md);
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--border-strong) 60%, var(--text-3));
+}
+
+.trigger:focus-visible,
+.open,
+.open:hover:not(:disabled) {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.trigger:disabled {
+  background: var(--surface-2);
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.trigger[aria-invalid="true"] {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px var(--red-soft);
+}
+
+.value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placeholder {
+  color: var(--text-3);
+}
+
+.chevron {
+  flex: none;
+  color: var(--text-3);
+  transition: transform var(--dur) var(--ease);
+}
+
+.open .chevron {
+  transform: rotate(180deg);
+}
+
+/* ── Popover menu (portalled to <body>, fixed position) ── */
+.menu {
+  position: fixed;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  max-height: min(320px, calc(100vh - 16px));
+  padding: 4px;
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  font-family: var(--font-sans);
+  font-size: var(--fs);
+  color: var(--text);
+  transform-origin: top center;
+  animation: selectIn 140ms var(--ease);
+}
+
+@keyframes selectIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.filterWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+  margin-bottom: 4px;
+}
+
+.filterIcon {
+  position: absolute;
+  left: 8px;
+  color: var(--text-4);
+  pointer-events: none;
+}
+
+.filter {
+  width: 100%;
+  height: var(--h-sm);
+  padding: 0 8px 0 27px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.filter:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.list {
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  margin-top: 4px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.group:first-child {
+  margin-top: 0;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--h-md);
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  user-select: none;
+}
+
+.item[aria-selected="true"] {
+  font-weight: 500;
+}
+
+.active {
+  background: var(--surface-2);
+}
+
+.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.itemLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check {
+  flex: none;
+  color: var(--accent);
+}
+
+.none {
+  padding: 10px 8px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+@media (max-width: 671px) {
+  .item {
+    min-height: 38px;
+  }
+}

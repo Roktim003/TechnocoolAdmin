@@ -6,6 +6,7 @@ import { Checkbox, SelectField, TextAreaField, TextField } from "@/components/ui
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Pagination } from "@/components/ui/Pagination";
+import { SkeletonLines, SkeletonTableRows } from "@/components/ui/Skeleton";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, download, errorMessage, type Page } from "@/lib/api-client";
 import { WEEKDAYS } from "@/modules/reporting/domain/schedule";
@@ -211,11 +212,7 @@ export function SchedulesPanel({
             </thead>
             <tbody>
               {loading && !list ? (
-                <tr>
-                  <td colSpan={7} className={styles.message}>
-                    Loading…
-                  </td>
-                </tr>
+                <SkeletonTableRows columns={7} rows={4} />
               ) : !list?.data.length ? (
                 <tr>
                   <td colSpan={7} className={styles.message}>
@@ -399,7 +396,7 @@ function HistoryDrawer({ schedule, onClose }: { schedule: ScheduleDto; onClose: 
           </button>
         </header>
         {error ? <Notification kind="error">{error}</Notification> : null}
-        {!runs && !error ? <p className={styles.muted}>Loading…</p> : null}
+        {!runs && !error ? <SkeletonLines lines={4} label="Loading runs" /> : null}
         {runs && !runs.length ? <p className={styles.muted}>This schedule has not run yet.</p> : null}
         <ul className={styles.runs}>
           {runs?.map((r) => (

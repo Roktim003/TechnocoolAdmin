@@ -14,7 +14,7 @@ export default async function AuthenticatedLayout({ children }: { children: Reac
   return (
     <AppShell
       user={{ name: principal.name, roleName: principal.roleName }}
-      nav={visibleNav(principal.permissions).map(({ href, label }) => ({ href, label }))}
+      nav={visibleNav(principal.permissions).map(({ href, label, group, icon }) => ({ href, label, group, icon }))}
       canSearchUsers={hasPermission(principal, "users", "FULL")}
     >
       {children}

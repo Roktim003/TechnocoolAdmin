@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { SkeletonTableRows } from "./Skeleton";
 import styles from "./DataTable.module.css";
 
 export interface Column<T> {
@@ -43,11 +44,7 @@ export function DataTable<T>({ columns, rows, rowKey, caption, loading, emptyMes
           </thead>
           <tbody>
             {loading && rows.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length} className={styles.message}>
-                  Loading…
-                </td>
-              </tr>
+              <SkeletonTableRows columns={columns.length} />
             ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={columns.length} className={styles.message}>

@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { PRICED } from "@/modules/purchasing/domain/types";
 import { dhakaDate } from "../../domain/schedule";
 import type { ReportRow, TagStyle } from "../../domain/types";
-import { bool, countCol, countTotal, date, dateCol, defineReport, moneyCol, moneyTotal, OVERDUE_TAGS, percentCol, PO_STATUS_TAGS, qtyCol, qtyTotal, str, tagCol, text, rowsOnly } from "../columns";
+import { bool, countCol, countTotal, date, dateCol, defineReport, ENTRY_STATUS_TAGS, moneyCol, moneyTotal, OVERDUE_TAGS, percentCol, PO_STATUS_TAGS, qtyCol, qtyTotal, str, tagCol, text, rowsOnly } from "../columns";
 import { fixed, int, isoDate, like, money, orderBy, qty, sql, uuidArray, where, zeroMoney, zeroQty } from "../sql";
 import { P } from "./common";
 
@@ -88,7 +88,7 @@ export const purchasesBySupplier = defineReport({
     number: 7,
     title: "Purchases by supplier",
     group: "Purchases",
-    description: "Per supplier in a date range: approved POs (by PO date) and their value in BDT, and posted GRNs (by entry date) at landed cost, split into imported and local.",
+    description: "Per supplier in a date range: approved POs (by PO date) and their value in BDT, and posted GRNs (by entry date) at landed cost, split into imported and local, with the BL and B/E numbers of the imported GRNs.",
     landscape: true,
   },
   params: [P.dateFrom(), P.dateTo(), P.supplier, P.warehouse],
@@ -104,6 +104,8 @@ export const purchasesBySupplier = defineReport({
     moneyCol("importedValueBdt", "Received — imported"),
     moneyCol("localValueBdt", "Received — local"),
     moneyCol("receivedValueBdt", "Received at landed cost", "seeCost", { sortKey: "received" }),
+    text("blNos", "BL nos.", { width: 24 }),
+    text("boeNos", "B/E nos.", { width: 24 }),
   ],
   totals: [countTotal("poCount", "Approved POs"), moneyTotal("orderedValueBdt", "Ordered value"), moneyTotal("importedValueBdt", "Imported"), moneyTotal("localValueBdt", "Local"), moneyTotal("receivedValueBdt", "Total received")],
   chart: (f) => (f.seeCost ? { type: "hbar", title: "Received value by supplier", valueType: "money", requires: "seeCost" } : { type: "hbar", title: "Approved POs by supplier", valueType: "number", requires: "none" }),
@@ -122,22 +124,25 @@ export const purchasesBySupplier = defineReport({
           ${fromDay ? sql`AND "poDate" >= ${fromDay}::date` : sql``} ${toDay ? sql`AND "poDate" <= ${toDay}::date` : sql``}
         GROUP BY 1
       ), grn AS (
-        SELECT "supplierId", COUNT(*) AS n,
-               SUM(CASE WHEN type = 'GRN_IMPORT' THEN "costTotal" ELSE 0 END) AS imported,
-               SUM(CASE WHEN type = 'GRN_LOCAL' THEN "costTotal" ELSE 0 END) AS local
-        FROM "StockEntry"
-        WHERE type IN ('GRN_IMPORT', 'GRN_LOCAL') AND status = 'POSTED' AND "supplierId" IS NOT NULL AND "warehouseId" = ANY(${scope})
-          ${fromDay ? sql`AND "entryDate" >= ${fromDay}::date` : sql``} ${toDay ? sql`AND "entryDate" <= ${toDay}::date` : sql``}
+        SELECT e."supplierId", COUNT(*) AS n,
+               SUM(CASE WHEN e.type = 'GRN_IMPORT' THEN e."costTotal" ELSE 0 END) AS imported,
+               SUM(CASE WHEN e.type = 'GRN_LOCAL' THEN e."costTotal" ELSE 0 END) AS local,
+               -- the shipment document numbers of the supplier's imported GRNs in the period
+               string_agg(DISTINCT sh."blNo", ', ' ORDER BY sh."blNo") AS "blNos",
+               string_agg(DISTINCT sh."boeNo", ', ' ORDER BY sh."boeNo") AS "boeNos"
+        FROM "StockEntry" e LEFT JOIN "ImportShipment" sh ON sh."entryId" = e.id
+        WHERE e.type IN ('GRN_IMPORT', 'GRN_LOCAL') AND e.status = 'POSTED' AND e."supplierId" IS NOT NULL AND e."warehouseId" = ANY(${scope})
+          ${fromDay ? sql`AND e."entryDate" >= ${fromDay}::date` : sql``} ${toDay ? sql`AND e."entryDate" <= ${toDay}::date` : sql``}
         GROUP BY 1
       ), base AS (
         SELECT s.id, s.code, s.name, s.type::text AS type, COALESCE(po.n, 0) AS "poCount", COALESCE(po.ordered, 0) AS ordered,
                COALESCE(grn.n, 0) AS "grnCount", COALESCE(grn.imported, 0) AS imported, COALESCE(grn.local, 0) AS local,
-               COALESCE(grn.imported, 0) + COALESCE(grn.local, 0) AS received
+               COALESCE(grn.imported, 0) + COALESCE(grn.local, 0) AS received, grn."blNos", grn."boeNos"
         FROM "Supplier" s LEFT JOIN po ON po."supplierId" = s.id LEFT JOIN grn ON grn."supplierId" = s.id
         WHERE (po.n IS NOT NULL OR grn.n IS NOT NULL) ${supplier ? sql`AND s.id = ${supplier}::uuid` : sql``}
       )`;
     const sort = orderBy(req.sort, { supplier: sql`name`, poCount: sql`"poCount"`, ordered: sql`ordered`, received: sql`received` }, sql`name`);
-    type Row = { id: string; code: string; name: string; type: string; poCount: bigint; ordered: D; grnCount: bigint; imported: D; local: D; received: D };
+    type Row = { id: string; code: string; name: string; type: string; poCount: bigint; ordered: D; grnCount: bigint; imported: D; local: D; received: D; blNos: string | null; boeNos: string | null };
     const rows = await db.$queryRaw<Row[]>`${base} SELECT * FROM base ORDER BY ${sort} LIMIT ${req.pageSize} OFFSET ${req.offset}`;
     const out: ReportRow[] = rows.map((r) => ({
       supplierCode: r.code,
@@ -149,6 +154,8 @@ export const purchasesBySupplier = defineReport({
       importedValueBdt: money(r.imported),
       localValueBdt: money(r.local),
       receivedValueBdt: money(r.received),
+      blNos: r.blNos,
+      boeNos: r.boeNos,
       _links: { supplier: `/purchases/suppliers/${r.id}` },
     }));
     if (!req.summary) return rowsOnly(out);
@@ -259,5 +266,155 @@ export const priceHistory = defineReport({
       totals: { prices: int(s?.n) },
       chart: productId && line.length ? { type: "line", title: "BDT unit price over time", valueType: "money", requires: "seeCost", series: ["BDT unit price"], points: line.map((l) => ({ label: isoDate(l.day)!, values: [fixed(l.bdt, 2)!] })) } : null,
     };
+  },
+});
+
+/* ───────────────────────── 15. Import shipments ───────────────────────── */
+
+const DOCS_TAGS: Record<string, TagStyle> = { COMPLETE: { label: "Complete", kind: "green" }, INCOMPLETE: { label: "Incomplete", kind: "red" } };
+/** Imported GRNs that count: posted ones and those waiting for verification (when documents are usually still being chased). */
+const SHIPMENT_STATUSES = ["POSTED", "PENDING"];
+
+export const importShipments = defineReport({
+  meta: {
+    id: "import-shipments",
+    number: 15,
+    title: "Import shipments",
+    group: "Purchases",
+    description:
+      "Every posted or pending GRN (Imported) by entry date with its shipment documents: BL, containers, Commercial Invoice, Bill of Entry, customs station and origin, the landed cost, the files attached, and whether the documents required for posting are complete (a number and at least one file each).",
+    landscape: true,
+  },
+  params: [
+    P.dateFrom(),
+    P.dateTo(),
+    P.supplier,
+    P.warehouse,
+    { key: "customsStation", label: "Customs station", kind: "text", placeholder: "e.g. Chattogram" },
+    { key: "country", label: "Country of origin", kind: "text", placeholder: "e.g. Thailand" },
+    { key: "incompleteOnly", label: "Documents incomplete only", kind: "boolean" },
+  ],
+  sortFields: ["grn", "date", "supplier", "boeDate"],
+  defaultSort: "-date",
+  columns: () => [
+    text("grnNo", "GRN no.", { sortKey: "grn", link: true, width: 16 }),
+    dateCol("date", "Date", { sortKey: "date" }),
+    text("supplier", "Supplier", { sortKey: "supplier", width: 26 }),
+    text("blNo", "BL no.", { width: 16 }),
+    text("containers", "Container(s)", { width: 24 }),
+    text("ciNo", "CI no.", { width: 16 }),
+    text("ciCurrency", "CI currency", { width: 8 }),
+    moneyCol("ciValue", "CI value", "seeCost"),
+    text("boeNo", "B/E no.", { width: 16 }),
+    dateCol("boeDate", "B/E date", { sortKey: "boeDate" }),
+    text("customsStation", "Customs station", { width: 22 }),
+    text("origins", "Origin(s)", { width: 18 }),
+    moneyCol("landedCostTotal", "Landed cost total", "seeCost"),
+    countCol("files", "Files attached"),
+    tagCol("documents", "Documents", DOCS_TAGS, { width: 12 }),
+    tagCol("status", "Status", ENTRY_STATUS_TAGS, { width: 10 }),
+  ],
+  totals: [countTotal("grns", "Imported GRNs"), countTotal("incomplete", "Documents incomplete"), moneyTotal("landedCostTotal", "Landed cost total")],
+  async query(db, p, req, ctx) {
+    const from = date(p, "dateFrom");
+    const to = date(p, "dateTo");
+    const fromDay = from ? dhakaDate(from) : null;
+    const toDay = to ? dhakaDate(to) : null;
+    const station = str(p, "customsStation");
+    const country = str(p, "country");
+    const entryCond = where([
+      sql`e.type = 'GRN_IMPORT'`,
+      sql`e.status::text = ANY(${SHIPMENT_STATUSES})`,
+      sql`e."warehouseId" = ANY(${uuidArray(ctx.scope)})`,
+      fromDay ? sql`e."entryDate" >= ${fromDay}::date` : null,
+      toDay ? sql`e."entryDate" <= ${toDay}::date` : null,
+      str(p, "supplierId") ? sql`e."supplierId" = ${str(p, "supplierId")}::uuid` : null,
+    ]);
+    // Complete = every document in InventorySettings.importDocsRequiredToPost has a number and at least one
+    // file of its type: the posting rule (no settings row yet means the default, CI + B/E).
+    const base = sql`
+      WITH req AS (
+        SELECT array_remove(COALESCE((SELECT "importDocsRequiredToPost"::text[] FROM "InventorySettings" WHERE id = 1), ARRAY['CI', 'BOE']), 'OTHER') AS docs
+      ), ents AS (
+        SELECT e.id, e.number, e."entryDate", e.status, e."supplierId", e."costTotal" FROM "StockEntry" e WHERE ${entryCond}
+      ), files AS (
+        SELECT a."entityId" AS id, COUNT(*) AS n, array_agg(DISTINCT a."docType"::text) AS types
+        FROM "Attachment" a JOIN ents ON ents.id = a."entityId"
+        WHERE a."entityType" = 'StockEntry' AND a."docType" IS NOT NULL
+        GROUP BY 1
+      ), origins AS (
+        SELECT l."entryId" AS id, string_agg(DISTINCT l."countryOfOrigin", ', ' ORDER BY l."countryOfOrigin") AS list
+        FROM "StockEntryLine" l JOIN ents ON ents.id = l."entryId"
+        WHERE COALESCE(btrim(l."countryOfOrigin"), '') <> ''
+        GROUP BY 1
+      ), base AS (
+        SELECT e.id, e.number, e."entryDate" AS day, e.status::text AS status, su.name AS supplier, e."costTotal",
+               sh."blNo", array_to_string(sh."containerNumbers", ', ') AS containers, sh."ciNo", sh."ciCurrency"::text AS "ciCurrency", sh."ciValue",
+               sh."boeNo", sh."boeDate", sh."customsStation", sh."countryOfOrigin" AS "coCountry", o.list AS "lineOrigins",
+               COALESCE(f.n, 0) AS files,
+               NOT EXISTS (
+                 SELECT 1 FROM unnest(req.docs) AS d(doc)
+                 WHERE NOT (d.doc = ANY(COALESCE(f.types, ARRAY[]::text[]))
+                   AND COALESCE(btrim(CASE d.doc WHEN 'BL' THEN sh."blNo" WHEN 'CO' THEN sh."coNo" WHEN 'PL' THEN sh."plNo" WHEN 'CI' THEN sh."ciNo" WHEN 'BOE' THEN sh."boeNo" END), '') <> '')
+               ) AS complete
+        FROM ents e
+        CROSS JOIN req
+        LEFT JOIN "ImportShipment" sh ON sh."entryId" = e.id
+        LEFT JOIN "Supplier" su ON su.id = e."supplierId"
+        LEFT JOIN files f ON f.id = e.id
+        LEFT JOIN origins o ON o.id = e.id
+      ), filtered AS (
+        SELECT * FROM base WHERE ${where([
+          station ? sql`"customsStation" ILIKE ${like(station)}` : null,
+          country ? sql`("lineOrigins" ILIKE ${like(country)} OR "coCountry" ILIKE ${like(country)})` : null,
+          bool(p, "incompleteOnly") ? sql`NOT complete` : null,
+        ])}
+      )`;
+    const sort = orderBy(req.sort, { grn: sql`number`, date: sql`day`, supplier: sql`supplier`, boeDate: sql`"boeDate"` }, sql`number DESC, id`);
+    type Row = {
+      id: string;
+      number: string | null;
+      day: Date;
+      status: string;
+      supplier: string | null;
+      costTotal: D;
+      blNo: string | null;
+      containers: string | null;
+      ciNo: string | null;
+      ciCurrency: string | null;
+      ciValue: D | null;
+      boeNo: string | null;
+      boeDate: Date | null;
+      customsStation: string | null;
+      coCountry: string | null;
+      lineOrigins: string | null;
+      files: bigint;
+      complete: boolean;
+    };
+    const rows = await db.$queryRaw<Row[]>`${base} SELECT * FROM filtered ORDER BY ${sort} LIMIT ${req.pageSize} OFFSET ${req.offset}`;
+    const out: ReportRow[] = rows.map((r) => ({
+      grnNo: r.number ?? "—",
+      date: isoDate(r.day),
+      supplier: r.supplier ?? "—",
+      blNo: r.blNo,
+      containers: r.containers || null,
+      ciNo: r.ciNo,
+      ciCurrency: r.ciCurrency,
+      ciValue: money(r.ciValue),
+      boeNo: r.boeNo,
+      boeDate: isoDate(r.boeDate),
+      customsStation: r.customsStation,
+      // The lines' distinct origins; the Certificate of Origin's country when no line has one.
+      origins: r.lineOrigins ?? r.coCountry,
+      landedCostTotal: money(r.costTotal),
+      files: int(r.files),
+      documents: r.complete ? "COMPLETE" : "INCOMPLETE",
+      status: r.status,
+      _links: { grnNo: `/stock/${r.id}` },
+    }));
+    if (!req.summary) return rowsOnly(out);
+    const [s] = await db.$queryRaw<{ n: bigint; incomplete: bigint; landed: D | null }[]>`${base}
+      SELECT COUNT(*) AS n, COUNT(*) FILTER (WHERE NOT complete) AS incomplete, SUM("costTotal") AS landed FROM filtered`;
+    return { rows: out, total: int(s?.n), totals: { grns: int(s?.n), incomplete: int(s?.incomplete), landedCostTotal: zeroMoney(s?.landed) }, chart: null };
   },
 });

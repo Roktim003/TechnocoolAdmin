@@ -1,8 +1,11 @@
 import { ValidationError, type ErrorDetail } from "@/shared/errors/app-error";
 import { formatDateTime } from "@/shared/time/format";
-import { DATE_TOKENS, dhakaDayBound, isDateToken, resolveDate } from "../domain/schedule";
+import { DATE_TOKENS, dhakaDayBound, isDateToken, isMonthToken, MONTH_TOKENS, monthCount, monthLabel, resolveDate, resolveMonth } from "../domain/schedule";
 import type { ParamDef } from "../domain/types";
 import type { FilterLine, Lookups, ParsedParams, WarehouseRef } from "./ports";
+
+/** Month-range reports cover at most this many months. */
+export const MAX_MONTHS = 36;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TRUE = new Set(["true", "1", "yes", "on"]);
@@ -22,13 +25,17 @@ export function cleanParams(defs: ParamDef[], raw: Record<string, unknown>): Rec
 
 /**
  * Validates a report's filters. Dates accept YYYY-MM-DD or a relative token ("monthStart",
- * "-7d", …) and become Asia/Dhaka day bounds; ids must be uuids; selects must be listed options.
+ * "-7d", …) and become Asia/Dhaka day bounds; months accept YYYY-MM or a relative month token
+ * ("thisMonth", "-5m", …) and become "YYYY-MM-01" (a range of at most MAX_MONTHS); ids must be
+ * uuids; selects must be listed options.
  */
 export function parseParams(defs: ParamDef[], raw: Record<string, string>, now: Date): ParsedParams {
   const out: ParsedParams = {};
   const errors: ErrorDetail[] = [];
   for (const p of defs) {
-    const v = raw[p.key];
+    let v = raw[p.key];
+    // A month range always has both ends: a missing month takes its (relative) default.
+    if ((v === undefined || v === "") && (p.kind === "monthFrom" || p.kind === "monthTo") && p.default) v = p.default;
     if (v === undefined || v === "") continue;
     switch (p.kind) {
       case "dateFrom":
@@ -40,6 +47,13 @@ export function parseParams(defs: ParamDef[], raw: Record<string, string>, now: 
           break;
         }
         out[p.key] = p.kind === "date" ? date : dhakaDayBound(date, p.kind === "dateFrom" ? "start" : "end");
+        break;
+      }
+      case "monthFrom":
+      case "monthTo": {
+        const month = resolveMonth(v, now);
+        if (month) out[p.key] = month;
+        else errors.push({ path: p.key, message: `Expected a month (YYYY-MM) or one of: ${Object.keys(MONTH_TOKENS).join(", ")}.` });
         break;
       }
       case "boolean":
@@ -64,6 +78,14 @@ export function parseParams(defs: ParamDef[], raw: Record<string, string>, now: 
   if (from && to && out[from.key] instanceof Date && out[to.key] instanceof Date && (out[from.key] as Date) > (out[to.key] as Date)) {
     errors.push({ path: to.key, message: "The end date is before the start date." });
   }
+  const mFrom = defs.find((d) => d.kind === "monthFrom");
+  const mTo = defs.find((d) => d.kind === "monthTo");
+  const fromMonth = mFrom ? out[mFrom.key] : undefined;
+  const toMonth = mTo ? out[mTo.key] : undefined;
+  if (typeof fromMonth === "string" && typeof toMonth === "string") {
+    if (fromMonth > toMonth) errors.push({ path: mTo!.key, message: "The last month is before the first month." });
+    else if (monthCount(fromMonth, toMonth) > MAX_MONTHS) errors.push({ path: mFrom!.key, message: `Choose at most ${MAX_MONTHS} months.` });
+  }
   if (errors.length) throw new ValidationError("The report filters are invalid.", errors);
   return out;
 }
@@ -83,6 +105,9 @@ export async function filterLines(defs: ParamDef[], raw: Record<string, string>,
       value = isDateToken(token) ? `${day} (${DATE_TOKENS[token].toLowerCase()})` : day;
     } else if (p.kind === "date") {
       value = String(v);
+    } else if (p.kind === "monthFrom" || p.kind === "monthTo") {
+      const token = raw[p.key] ?? p.default ?? "";
+      value = isMonthToken(token) ? `${monthLabel(String(v))} (${MONTH_TOKENS[token].toLowerCase()})` : monthLabel(String(v));
     } else if (typeof v === "boolean") {
       value = v ? "Yes" : "No";
     } else if (p.kind === "select") {

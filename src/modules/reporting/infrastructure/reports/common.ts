@@ -4,6 +4,9 @@ import type { ParamDef } from "../../domain/types";
 export const P = {
   dateFrom: (dflt = "monthStart"): ParamDef => ({ key: "dateFrom", label: "From", kind: "dateFrom", default: dflt }),
   dateTo: (dflt = "today"): ParamDef => ({ key: "dateTo", label: "To", kind: "dateTo", default: dflt }),
+  /** Month ranges ("YYYY-MM" or a month token); a missing end takes its default (last 6 months). */
+  monthFrom: (dflt = "-5m"): ParamDef => ({ key: "monthFrom", label: "From month", kind: "monthFrom", default: dflt }),
+  monthTo: (dflt = "thisMonth"): ParamDef => ({ key: "monthTo", label: "To month", kind: "monthTo", default: dflt }),
   warehouse: { key: "warehouseId", label: "Warehouse", kind: "warehouse" } as ParamDef,
   brand: { key: "catalogId", label: "Brand", kind: "catalog" } as ParamDef,
   category: { key: "categoryId", label: "Category", kind: "category" } as ParamDef,

@@ -3,20 +3,45 @@ import type { ProjectEntryRow } from "@/modules/inventory/application/ports";
 import type { MaterialProduct } from "../application/costing.service";
 import type { AttachmentRecord, AuditRow, CostRecord, ProjectRecord, ProjectsActor, StatusHistoryRecord } from "../application/ports";
 import type { ProjectSummary } from "../domain/rules";
-import { COST_CATEGORY_LABEL, ISSUE_STATUSES, PROJECT_STATUS_LABEL, PROJECT_TYPE_LABEL, type CostCategory, type Transition } from "../domain/types";
+import { COST_CATEGORY_LABEL, ISSUE_STATUSES, isOverhead, PROJECT_STATUS_LABEL, PROJECT_TYPE_LABEL, type CostCategory, type Transition } from "../domain/types";
+import { canEditOverheads } from "../application/cost.service";
 
 const iso = (v: Date | null) => (v ? v.toISOString() : null);
 
 /**
  * Summary figures for the viewer: cost amounts only with seeCost, contract value / margin /
  * cost-used % only with seeMargin. (The API's sensitive-field filter strips the same keys.)
+ *
+ * Overheads: with overhead access (overheads ≥ VIEW + seeCost) the summary adds the three
+ * overheads, overheadCost and fullCost, and margin / marginPercent / costUsedPercent are on full
+ * cost (directMargin / directMarginPercent alongside). Without it everything is on direct cost
+ * (`totalCost` = direct cost) and no overhead figure is sent.
  */
 export function summaryFor(s: ProjectSummary, viewer: ProjectsActor) {
+  const oh = viewer.canSeeOverheads;
   return {
     ...(viewer.canSeeCost
-      ? { netMaterialCost: s.netMaterialCost, issuedCost: s.issuedCost, returnedCost: s.returnedCost, labourCost: s.labourCost, transportCost: s.transportCost, otherCost: s.otherCost, totalCost: s.totalCost }
+      ? {
+          netMaterialCost: s.netMaterialCost,
+          issuedCost: s.issuedCost,
+          returnedCost: s.returnedCost,
+          labourCost: s.labourCost,
+          transportCost: s.transportCost,
+          otherCost: s.otherCost,
+          totalCost: s.totalCost,
+          directCost: s.directCost,
+          ...(oh ? { storeChargeCost: s.storeChargeCost, holdingCost: s.holdingCost, establishmentCost: s.establishmentCost, overheadCost: s.overheadCost, fullCost: s.fullCost } : {}),
+        }
       : {}),
-    ...(viewer.canSeeMargin ? { contractValue: s.contractValue, margin: s.margin, marginPercent: s.marginPercent, ...(viewer.canSeeCost ? { costUsedPercent: s.costUsedPercent } : {}) } : {}),
+    ...(viewer.canSeeMargin
+      ? {
+          contractValue: s.contractValue,
+          margin: oh ? s.margin : s.directMargin,
+          marginPercent: oh ? s.marginPercent : s.directMarginPercent,
+          ...(oh ? { directMargin: s.directMargin, directMarginPercent: s.directMarginPercent } : {}),
+          ...(viewer.canSeeCost ? { costUsedPercent: oh ? s.costUsedPercent : s.directCostUsedPercent, ...(oh ? { directCostUsedPercent: s.directCostUsedPercent } : {}) } : {}),
+        }
+      : {}),
   };
 }
 
@@ -28,6 +53,11 @@ export function projectActions(p: ProjectRecord, a: ProjectsActor, transitions: 
     editContractValue: open && hasLevel(a.level, "FULL") && a.canSeeMargin,
     addCost: open && hasLevel(a.level, "CREATE"),
     voidCost: open && hasLevel(a.level, "FULL"),
+    /** Overheads (store charge, holding, established cost): add / edit / void at any status (a reason when closed). */
+    addOverhead: canEditOverheads(a),
+    editOverhead: canEditOverheads(a),
+    overheadReasonRequired: p.status === "CLOSED",
+    seeOverheads: a.canSeeOverheads,
     upload: hasLevel(a.level, "CREATE"),
     /** Issue material (Module 2 form) — planning / running, active, inventory ≥ CREATE. */
     issueMaterial: ISSUE_STATUSES.includes(p.status) && p.isActive && hasLevel(a.inventoryLevel, "CREATE"),
@@ -106,16 +136,25 @@ export function toEntryRowDto(e: ProjectEntryRow, viewer: ProjectsActor) {
   };
 }
 
-export function toCostDto(c: CostRecord, viewer: ProjectsActor) {
+export function toCostDto(c: CostRecord, viewer: ProjectsActor, project?: Pick<ProjectRecord, "status">) {
+  const overhead = isOverhead(c.category);
+  const open = project ? project.status !== "CLOSED" : true;
   return {
     id: c.id,
     date: c.date,
     category: c.category,
     categoryLabel: COST_CATEGORY_LABEL[c.category],
+    kind: overhead ? ("OVERHEAD" as const) : ("DIRECT" as const),
     description: c.description,
     ...(viewer.canSeeCost ? { amount: c.amount } : {}),
     vendorOrPayee: c.vendorOrPayee,
     referenceNo: c.referenceNo,
+    ...(overhead ? { periodFrom: c.periodFrom, periodTo: c.periodTo, basisNote: c.basisNote, updatedBy: c.updatedBy, updatedAt: c.updatedAt.toISOString() } : {}),
+    actions: {
+      edit: overhead && !c.voidedAt && canEditOverheads(viewer),
+      void: !c.voidedAt && (overhead ? canEditOverheads(viewer) : open && hasLevel(viewer.level, "FULL")),
+      history: true,
+    },
     createdBy: c.createdBy,
     voided: !!c.voidedAt,
     voidedAt: iso(c.voidedAt),
@@ -126,12 +165,46 @@ export function toCostDto(c: CostRecord, viewer: ProjectsActor) {
   };
 }
 
-/** Category subtotals of the listed, non-voided costs (seeCost only). */
+/**
+ * Category subtotals of the listed, non-voided costs (seeCost only). `costsTotal` stays the
+ * labour + transport + other total; overhead subtotals only with overhead access.
+ */
 export function costSubtotals(costs: CostRecord[], viewer: ProjectsActor) {
   if (!viewer.canSeeCost) return {};
-  const sum = (cat?: CostCategory) => costs.filter((c) => !c.voidedAt && (!cat || c.category === cat)).reduce((s, c) => s + Math.round(Number(c.amount) * 100), 0);
+  const sum = (cats: CostCategory[]) => costs.filter((c) => !c.voidedAt && cats.includes(c.category)).reduce((s, c) => s + Math.round(Number(c.amount) * 100), 0);
   const m = (cents: number) => (cents / 100).toFixed(2);
-  return { labourCost: m(sum("LABOUR")), transportCost: m(sum("TRANSPORT")), otherCost: m(sum("OTHER")), costsTotal: m(sum()) };
+  const direct = { labourCost: m(sum(["LABOUR"])), transportCost: m(sum(["TRANSPORT"])), otherCost: m(sum(["OTHER"])), costsTotal: m(sum(["LABOUR", "TRANSPORT", "OTHER"])) };
+  if (!viewer.canSeeOverheads) return direct;
+  return {
+    ...direct,
+    storeChargeCost: m(sum(["STORE_CHARGE"])),
+    holdingCost: m(sum(["HOLDING"])),
+    establishmentCost: m(sum(["ESTABLISHMENT"])),
+    overheadCost: m(sum(["STORE_CHARGE", "HOLDING", "ESTABLISHMENT"])),
+  };
+}
+
+/** The audit trail of one cost line: old → new values, who, when, why. */
+export function toCostHistoryDto(rows: AuditRow[], viewer: ProjectsActor) {
+  const fields = ["amount", "category", "description", "date", "vendorOrPayee", "referenceNo", "periodFrom", "periodTo", "basisNote"] as const;
+  return rows.map((r) => {
+    const b = r.before ?? {};
+    const a = r.after ?? {};
+    const kind = r.action.endsWith("_add") ? "CREATED" : r.action.endsWith("_void") ? "VOIDED" : "EDITED";
+    const changes =
+      kind === "EDITED"
+        ? fields.filter((f) => (b[f] ?? null) !== (a[f] ?? null) && (f !== "amount" || viewer.canSeeCost)).map((f) => ({ field: f, from: (b[f] as string | null) ?? null, to: (a[f] as string | null) ?? null }))
+        : [];
+    return {
+      id: r.id,
+      action: kind,
+      at: r.at.toISOString(),
+      by: r.by,
+      ...(viewer.canSeeCost ? { amount: ((kind === "VOIDED" ? b.amount : a.amount) as string | undefined) ?? null, ...(kind === "EDITED" ? { amountBefore: (b.amount as string) ?? null } : {}) } : {}),
+      changes,
+      reason: (a.reason as string | undefined) ?? null,
+    };
+  });
 }
 
 export const toHistoryDto = (h: StatusHistoryRecord) => ({
@@ -160,6 +233,9 @@ export function toActivityDto(r: AuditRow, viewer: ProjectsActor) {
     "project.contract_value": () => (viewer.canSeeMargin ? `Contract value: ${b.contractValue ? money(b.contractValue) : "none"} → ${a.contractValue ? money(a.contractValue) : "none"}` : "Contract value changed"),
     "project.cost_add": () => `Cost added — ${cost(a)}`,
     "project.cost_void": () => `Cost voided — ${cost(b)}${a.reason ? ` — “${String(a.reason)}”` : ""}`,
+    "project.overhead_add": () => `Overhead added — ${cost(a)}${a.reason ? ` — “${String(a.reason)}”` : ""}`,
+    "project.overhead_edit": () => `Overhead edited — ${cost(b)}${viewer.canSeeCost && b.amount !== a.amount ? ` → ${money(a.amount)}` : ""}${a.reason ? ` — “${String(a.reason)}”` : ""}`,
+    "project.overhead_void": () => `Overhead voided — ${cost(b)}${a.reason ? ` — “${String(a.reason)}”` : ""}`,
     "project.attachment_add": () => `Files added: ${((a.files as { fileName: string }[]) ?? []).map((f) => f.fileName).join(", ")}`,
     "project.attachment_remove": () => `File removed: ${String(b.fileName ?? "")}`,
     "project.cost_receipt_add": () => `Receipt added: ${((a.files as { fileName: string }[]) ?? []).map((f) => f.fileName).join(", ")}`,

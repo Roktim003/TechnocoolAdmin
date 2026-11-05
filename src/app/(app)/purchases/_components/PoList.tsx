@@ -135,8 +135,8 @@ export function PoList({ caps, warehouses, mode, onCount, supplierId: fixedSuppl
         </span>
       ),
     },
-    { key: "status", header: "Status", render: (p) => <Tag kind={PO_STATUS_TAG[p.status]}>{PO_STATUS_LABEL[p.status]}</Tag> },
-    { key: "by", header: "Created by", render: (p) => <span className={styles.nowrap}>{p.createdBy.name}</span> },
+    { key: "status", header: "Status", render: (p) => <span className={styles.nowrap}><Tag kind={PO_STATUS_TAG[p.status]}>{PO_STATUS_LABEL[p.status]}</Tag></span> },
+    { key: "by", header: "Created by", render: (p) => <span>{p.createdBy.name}</span> },
   ];
 
   const toolbar = (

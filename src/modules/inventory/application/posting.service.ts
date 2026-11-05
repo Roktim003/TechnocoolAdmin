@@ -4,6 +4,7 @@ import { computeEntry, type CalcResult } from "../domain/calculate";
 import { applyExactOut, applyIn, fromCostState, toCostState, type CostState } from "../domain/cost";
 import { d, money, ZERO, type Dec } from "../domain/decimal";
 import { InventoryErrors } from "../domain/errors";
+import { documentsChecklist, missingRequiredDocs } from "../domain/import-docs";
 import { fiscalYear, formatDocNumber, todayInDhaka } from "../domain/numbering";
 import { assertSerialCount } from "../domain/rules";
 import { ENTRY_TYPE_META, SERIAL_OUT_STATUS, takesStock, type Condition, type ProductCostState, type SerialStatus } from "../domain/types";
@@ -88,6 +89,11 @@ export class StockPostingService {
     if (e.type === "REVERSAL") throw InventoryErrors.wrongStatus("post", e.status);
     if (!e.lines.length) throw InventoryErrors.noLines();
     const settings = await store.settings();
+    // GRN (Imported): every required import document needs a number and at least one file.
+    if (e.type === "GRN_IMPORT") {
+      const missing = missingRequiredDocs(documentsChecklist(e.importShipment, e.docFileCounts, settings.importDocsRequiredToPost));
+      if (missing.length) throw InventoryErrors.importDocsMissing(missing);
+    }
     const meta = ENTRY_TYPE_META[e.type];
     const isTransfer = e.type === "TRANSFER";
     const wh = e.warehouse;

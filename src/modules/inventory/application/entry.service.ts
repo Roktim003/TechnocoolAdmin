@@ -6,7 +6,9 @@ import { InventoryErrors } from "../domain/errors";
 import { fiscalYear, formatDocNumber, todayInDhaka } from "../domain/numbering";
 import { allowsDiscontinued, assertCondition, assertEditable, assertProjectStatus, assertSerialCount, available, CANCELLABLE, normalizeSerial } from "../domain/rules";
 import { ENTRY_TYPE_META, takesStock, type EntryType } from "../domain/types";
-import type { CreateEntryInput, EntryFilters, EntryInput, LandedCostInput, ReceiveInput } from "./dto";
+import { documentsChecklist, importWarnings, missingRequiredDocs, missingText, type DocChecklistItem } from "../domain/import-docs";
+import type { CalculateEntryInput, CreateEntryInput, EntryFilters, EntryInput, LandedCostInput, ReceiveInput } from "./dto";
+import { goodsValue, shipmentFromInput } from "./import-docs.service";
 import { draftRef, type StockPostingService } from "./posting.service";
 import { notifyProjectMaterial } from "./project-events";
 import { receiptEvent, receiptListener } from "./receipts";
@@ -24,7 +26,7 @@ import {
   type ProductInfo,
 } from "./ports";
 
-type Warning = { line: number | null; code: string; message: string };
+type Warning = { line: number | null; code: string; message: string; link?: { entryId: string; number: string | null; href: string } };
 
 /** What the audit trail stores for an entry. */
 export function entrySnapshot(e: EntryRecord) {
@@ -116,7 +118,7 @@ export class EntryService {
       assertEditable(before.status);
       if (before.createdBy.id !== actor.actorId) throw InventoryErrors.notCreator("edit");
       this.assertCanCreate(actor, input.type as EntryType, input.warehouseId);
-      await store.replaceEntry(id, await this.toWrite(store, input, settings, actor));
+      await store.replaceEntry(id, await this.toWrite(store, input, settings, actor, undefined, before));
       const after = (await store.entry(id))!;
       await store.audit.record(actor, { action: "stock_entry.update", entityType: "StockEntry", entityId: id, before: entrySnapshot(before), after: entrySnapshot(after) });
     });
@@ -133,8 +135,13 @@ export class EntryService {
    * serials. GRNs against a purchase order take supplier, currency, rate and prices from the PO.
    * With `warnings` (preview), over-receipt is reported instead of thrown.
    */
-  private async toWrite(store: InventoryStore, input: EntryInput, settings: InventorySettings, actor: InventoryActor, warnings?: Warning[]): Promise<EntryWrite> {
+  private async toWrite(store: InventoryStore, input: EntryInput, settings: InventorySettings, actor: InventoryActor, warnings?: Warning[], existing?: EntryRecord | null): Promise<EntryWrite> {
     const type = input.type as EntryType;
+    // Import documents belong to GRN (Imported) only.
+    if (input.importShipment && type !== "GRN_IMPORT") throw InventoryErrors.importDocsNotAllowed();
+    const shipment =
+      type === "GRN_IMPORT" && input.importShipment !== undefined ? shipmentFromInput(input.importShipment ?? {}, existing?.importShipment ?? null, actor.canSeeCost) : undefined;
+    const coCountry = (shipment ?? existing?.importShipment)?.countryOfOrigin ?? null;
     const products = new Map((await store.products(input.lines.map((l) => l.productId))).map((p) => [p.id, p]));
     for (const l of input.lines) if (!products.has(l.productId)) throw InventoryErrors.unknown("product");
     const meta = ENTRY_TYPE_META[type];
@@ -172,9 +179,12 @@ export class EntryService {
         condition: (l.condition as "GOOD" | "DAMAGED") ?? "GOOD",
         originalLineId: l.originalLineId ?? null,
         purchaseOrderLineId: l.purchaseOrderLineId ?? null,
+        // GRN (Imported): the line's origin, else the product's, else the Certificate of Origin's.
+        countryOfOrigin: type === "GRN_IMPORT" ? (l.countryOfOrigin ?? products.get(l.productId)!.countryOfOrigin ?? coCountry) : null,
         note: l.note ?? null,
         serials: (l.serials ?? []).map(normalizeSerial).filter(Boolean),
       })),
+      ...(shipment ? { importShipment: shipment } : {}),
       charges: type === "GRN_IMPORT" ? input.charges.map((c) => ({ type: c.type, mode: c.mode, value: c.value, includeInCost: c.includeInCost, label: c.label ?? null })) : [],
     };
     if (write.purchaseOrderId) await this.applyPurchaseOrder(store, write, input, actor, products, warnings);
@@ -464,12 +474,15 @@ export class EntryService {
    * Computes lines, landed cost, totals, availability and warnings without saving anything,
    * using the same computation the posting engine runs.
    */
-  async calculate(actor: InventoryActor, input: EntryInput) {
+  async calculate(actor: InventoryActor, calcInput: CalculateEntryInput) {
+    const { entryId, ...input } = calcInput;
     const store = this.store;
     const settings = await store.settings();
     if (!actor.warehouseIds.includes(input.warehouseId)) throw InventoryErrors.outOfScope();
+    // Editing a saved entry: its uploaded files count in the documents checklist.
+    const saved = entryId ? await this.get(actor, entryId) : null;
     const warnings: Warning[] = [];
-    const write = await this.toWrite(store, input, settings, actor, warnings);
+    const write = await this.toWrite(store, input, settings, actor, warnings, saved);
     const type = write.type;
     const products = new Map((await store.products(write.lines.map((l) => l.productId))).map((p) => [p.id, p]));
     const costs = await store.costs(write.lines.map((l) => l.productId));
@@ -507,6 +520,7 @@ export class EntryService {
         unitPrice: l.unitPrice,
         condition: l.condition,
         purchaseOrderLineId: l.purchaseOrderLineId ?? null,
+        countryOfOrigin: l.countryOfOrigin ?? null,
         available: avail,
         insufficient: short,
         ...calc.lines[i]!,
@@ -516,6 +530,19 @@ export class EntryService {
     const freeze = await store.activeCount(write.warehouseId, write.lines.map((l) => l.productId));
     if (freeze) warnings.push({ line: null, code: "COUNT_IN_PROGRESS", message: `Stock count ${freeze.number} is in progress for some of these products in this warehouse; the entry can't be posted until it ends.` });
     if (type === "OPENING" && (await store.openingLocked(write.warehouseId))) warnings.push({ line: null, code: "OPENING_LOCKED", message: "Opening stock for this warehouse is locked." });
+
+    // GRN (Imported): documents checklist (required before posting) and non-blocking warnings.
+    let documentsChecklistOut: DocChecklistItem[] | null = null;
+    if (type === "GRN_IMPORT") {
+      const shipment = write.importShipment ?? saved?.importShipment ?? null;
+      documentsChecklistOut = documentsChecklist(shipment, saved?.docFileCounts ?? {}, settings.importDocsRequiredToPost);
+      const missing = missingRequiredDocs(documentsChecklistOut);
+      if (missing.length) warnings.push({ line: null, code: "IMPORT_DOCS_MISSING", message: `Needed before posting: ${missing.map(missingText).join("; ")}.` });
+      if (shipment) {
+        const duplicates = await store.importDuplicates({ blNo: shipment.blNo, ciNo: shipment.ciNo, boeNo: shipment.boeNo }, saved?.id ?? null);
+        warnings.push(...importWarnings(shipment, { currency: write.currency, goodsValue: goodsValue(write.lines) }, duplicates));
+      }
+    }
 
     const fy = fiscalYear(new Date(`${write.entryDate}T00:00:00Z`), settings.fiscalYearStartMonth);
     const prefix = ENTRY_TYPE_META[type].prefix;
@@ -532,6 +559,7 @@ export class EntryService {
       charges: write.charges.map((c, i) => ({ ...c, amountBdt: calc.charges[i]!.amountBdt })),
       totals: calc.totals,
       warnings,
+      ...(documentsChecklistOut ? { documentsChecklist: documentsChecklistOut } : {}),
     };
   }
 

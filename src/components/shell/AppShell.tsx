@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { HeaderActions } from "./HeaderActions";
-import { SideNav, type SideNavItem } from "./SideNav";
+import { Icon } from "@/components/ui/Icon";
+import { HeaderActions, UserMenu } from "./HeaderActions";
+import { Crumbs, SideNav, type SideNavItem } from "./SideNav";
 import styles from "./AppShell.module.css";
 
 export interface AppShellProps {
@@ -10,31 +11,43 @@ export interface AppShellProps {
   children: React.ReactNode;
 }
 
+/** Gr8r Studio shell: warm-gray sidebar (brand, grouped nav, user) beside a white top bar and content. */
 export function AppShell({ user, nav, canSearchUsers, children }: AppShellProps) {
   return (
     <div className={styles.shell}>
       <a href="#main" className={styles.skip}>
         Skip to main content
       </a>
-      <header className={styles.header} data-print="hide">
-        <Link href="/dashboard" className={styles.brand}>
-          <strong>StockBook</strong>
-        </Link>
-        {canSearchUsers ? (
-          <form action="/users" className={styles.search} role="search">
-            <label htmlFor="shell-search" className="visually-hidden">
-              Search users
-            </label>
-            <input id="shell-search" name="q" type="search" placeholder="Search users" className={styles.searchInput} autoComplete="off" />
-          </form>
-        ) : (
-          <span className={styles.spacer} />
-        )}
-        <HeaderActions name={user.name} roleName={user.roleName} />
-      </header>
-      <div className={styles.body}>
+      <aside className={styles.side} data-print="hide">
+        <div className={styles.sideTop}>
+          <Link href="/dashboard" className={styles.brand}>
+            <span className={styles.logo} aria-hidden="true">
+              SB
+            </span>
+            <span className={styles.brandName}>StockBook</span>
+          </Link>
+        </div>
         <SideNav items={nav} />
-        <main id="main" className={styles.main}>
+        <div className={styles.sideBottom}>
+          <UserMenu name={user.name} roleName={user.roleName} />
+        </div>
+      </aside>
+      <div className={styles.main}>
+        <header className={styles.topbar} data-print="hide">
+          <Crumbs items={nav} />
+          <span className={styles.spacer} />
+          {canSearchUsers ? (
+            <form action="/users" className={styles.search} role="search">
+              <Icon name="search" size={14} className={styles.searchIcon} />
+              <label htmlFor="shell-search" className="visually-hidden">
+                Search users
+              </label>
+              <input id="shell-search" name="q" type="search" placeholder="Search users" className={styles.searchInput} autoComplete="off" />
+            </form>
+          ) : null}
+          <HeaderActions />
+        </header>
+        <main id="main" className={styles.content}>
           {children}
         </main>
       </div>

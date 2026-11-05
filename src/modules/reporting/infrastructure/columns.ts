@@ -2,7 +2,7 @@ import { ENTRY_TYPE_META, ENTRY_TYPES } from "@/modules/inventory/domain/types";
 import { PO_STATUS_LABEL, PO_STATUSES } from "@/modules/purchasing/domain/types";
 import { PROJECT_STATUS_LABEL, PROJECT_STATUSES } from "@/modules/projects/domain/types";
 import type { Db } from "@/shared/db/prisma";
-import type { ColumnDef, Requirement, TagStyle, TotalDef } from "../domain/types";
+import type { ColumnDef, Requires, TagStyle, TotalDef } from "../domain/types";
 import type { ParsedParams, ReportDefinition, RunContext, RunOutput, RunRequest } from "../application/ports";
 import { readOnly } from "./sql";
 
@@ -11,12 +11,12 @@ type Opt = Partial<ColumnDef>;
 export const text = (key: string, label: string, o: Opt = {}): ColumnDef => ({ key, label, type: "text", align: "start", requires: "none", ...o });
 export const qtyCol = (key: string, label: string, o: Opt = {}): ColumnDef => ({ key, label, type: "number", align: "end", requires: "none", decimals: 3, width: 12, ...o });
 export const countCol = (key: string, label: string, o: Opt = {}): ColumnDef => ({ key, label, type: "number", align: "end", requires: "none", decimals: 0, width: 10, ...o });
-export const percentCol = (key: string, label: string, requires: Requirement, o: Opt = {}): ColumnDef => ({ key, label, type: "number", align: "end", requires, decimals: 1, percent: true, negativeRed: true, width: 10, ...o });
-export const moneyCol = (key: string, label: string, requires: Requirement = "seeCost", o: Opt = {}): ColumnDef => ({ key, label, type: "money", align: "end", requires, width: 16, ...o });
+export const percentCol = (key: string, label: string, requires: Requires, o: Opt = {}): ColumnDef => ({ key, label, type: "number", align: "end", requires, decimals: 1, percent: true, negativeRed: true, width: 10, ...o });
+export const moneyCol = (key: string, label: string, requires: Requires = "seeCost", o: Opt = {}): ColumnDef => ({ key, label, type: "money", align: "end", requires, width: 16, ...o });
 export const dateCol = (key: string, label: string, o: Opt = {}): ColumnDef => ({ key, label, type: "date", align: "start", requires: "none", width: 12, ...o });
 export const tagCol = (key: string, label: string, tags: Record<string, TagStyle>, o: Opt = {}): ColumnDef => ({ key, label, type: "tag", align: "start", requires: "none", tags, width: 16, ...o });
 
-export const moneyTotal = (key: string, label: string, requires: Requirement = "seeCost"): TotalDef => ({ key, label, type: "money", requires });
+export const moneyTotal = (key: string, label: string, requires: Requires = "seeCost"): TotalDef => ({ key, label, type: "money", requires });
 export const qtyTotal = (key: string, label: string): TotalDef => ({ key, label, type: "number", requires: "none", decimals: 3 });
 export const countTotal = (key: string, label: string): TotalDef => ({ key, label, type: "number", requires: "none", decimals: 0 });
 

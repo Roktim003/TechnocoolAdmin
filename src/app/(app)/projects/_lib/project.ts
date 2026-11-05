@@ -11,7 +11,11 @@ export async function loadProject(actor: ProjectsActor, id: string): Promise<Pro
   if (!UuidSchema.safeParse(id).success) return null;
   try {
     const r = await projects().projects.detail(actor, id);
-    return filterSensitiveFields(toProjectDto(r.project, r.summary, actor, r.transitions), { flags: { seeCost: actor.canSeeCost, seeProfit: false, seeMargin: actor.canSeeMargin } }) as ProjectDto;
+    // permissions.overheads: without it the filter also strips the overhead figures.
+    return filterSensitiveFields(toProjectDto(r.project, r.summary, actor, r.transitions), {
+      flags: { seeCost: actor.canSeeCost, seeProfit: false, seeMargin: actor.canSeeMargin },
+      permissions: { overheads: actor.overheadsLevel },
+    }) as ProjectDto;
   } catch (err) {
     if (err instanceof NotFoundError) return null;
     throw err;

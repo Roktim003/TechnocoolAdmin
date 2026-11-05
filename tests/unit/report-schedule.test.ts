@@ -86,7 +86,7 @@ describe("visibility", () => {
     const chart = { type: "bar" as const, title: "T", valueType: "money" as const, requires: "seeMargin" as const, points: [] };
     expect(chartVisible(chart, accounts)).toBeNull();
     expect(chartVisible({ ...chart, requires: "seeProfit" }, accounts)).not.toBeNull();
-    expect(intersectFlags(accounts, { seeCost: false, seeProfit: true, seeMargin: true })).toEqual({ seeCost: false, seeProfit: true, seeMargin: false });
+    expect(intersectFlags(accounts, { seeCost: false, seeProfit: true, seeMargin: true })).toEqual({ seeCost: false, seeProfit: true, seeMargin: false, overheads: false });
   });
   it("a file is downloadable only by someone who sees at least its audience", () => {
     const v = { userId: "u", name: "U", isAdmin: false, permissions: {} as never, flags: accounts, warehouseIds: ["a", "b"] };

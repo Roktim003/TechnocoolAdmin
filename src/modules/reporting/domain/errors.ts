@@ -3,6 +3,7 @@ import { AppError, BusinessRuleError, ForbiddenError, NotFoundError, ValidationE
 export const ReportErrors = {
   unknownReport: () => new NotFoundError("Report"),
   outOfScope: () => new ForbiddenError("You do not have access to this warehouse."),
+  reportForbidden: () => new ForbiddenError("This report shows overhead costs: it needs Overheads access (view) and See cost."),
   timeout: (seconds: number) =>
     new AppError("QUERY_TIMEOUT", 503, `This report took longer than ${seconds} seconds. Narrow the filters (date range, warehouse, brand) and try again.`),
   tooManyRows: (max: number, total: number) =>

@@ -7,10 +7,11 @@ import { Chart } from "@/components/charts/Chart";
 import { Button } from "@/components/ui/Button";
 import { Notification } from "@/components/ui/Notification";
 import { Pagination } from "@/components/ui/Pagination";
+import { SkeletonTableRows } from "@/components/ui/Skeleton";
 import { Tag } from "@/components/ui/Tag";
 import { api, errorMessage } from "@/lib/api-client";
 import { formatBdt, formatCell, isNegative } from "@/modules/reporting/domain/format";
-import { DATE_TOKENS, isDateToken } from "@/modules/reporting/domain/schedule";
+import { DATE_TOKENS, isDateToken, isMonthToken, monthLabel, MONTH_TOKENS } from "@/modules/reporting/domain/schedule";
 import { FilterFields } from "./FilterFields";
 import { cleanFilters, withDefaults, type ColumnDef, type Lookups, type ReportInfo, type RunResult } from "./types";
 import styles from "./reports.module.css";
@@ -127,7 +128,14 @@ export function ReportView({
     .filter((p) => applied[p.key])
     .map((p) => {
       const v = applied[p.key]!;
-      const label = isDateToken(v) ? DATE_TOKENS[v] : p.options?.find((o) => o.value === v)?.label ?? lookupName(lookups, p.kind, v) ?? v;
+      const month = p.kind === "monthFrom" || p.kind === "monthTo";
+      const label = isDateToken(v)
+        ? DATE_TOKENS[v]
+        : month && isMonthToken(v)
+          ? MONTH_TOKENS[v]
+          : month && /^\d{4}-\d{2}/.test(v)
+            ? monthLabel(v)
+            : (p.options?.find((o) => o.value === v)?.label ?? lookupName(lookups, p.kind, v) ?? v);
       return `${p.label}: ${label}`;
     });
 
@@ -244,11 +252,7 @@ export function ReportView({
             </thead>
             <tbody>
               {loading && !rows.length ? (
-                <tr>
-                  <td colSpan={columns.length + 1} className={styles.message}>
-                    Loading…
-                  </td>
-                </tr>
+                <SkeletonTableRows columns={columns.length + 1} />
               ) : !rows.length ? (
                 <tr>
                   <td colSpan={columns.length + 1} className={styles.message}>

@@ -103,6 +103,8 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
   }
 
   const s = p.summary;
+  // Overhead access: the API sends fullCost (and margin on full cost); otherwise today's direct-cost tiles.
+  const full = s.fullCost !== undefined;
   const used = s.costUsedPercent ? Number(s.costUsedPercent) : null;
   const engineer = p.siteEngineer?.name ?? p.siteEngineerName;
   const stockLink = (type: string) => `/stock?tab=new&type=${type}&project=${p.id}${p.defaultWarehouse ? `&warehouse=${p.defaultWarehouse.id}` : ""}`;
@@ -196,14 +198,31 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
           <Tile label="Labour" value={s.labourCost} />
           <Tile label="Transport" value={s.transportCost} />
           <Tile label="Other" value={s.otherCost} />
-          <Tile label="Total cost" value={s.totalCost} total />
+          {full ? (
+            <>
+              <Tile label="Store charge" value={s.storeChargeCost} />
+              <Tile label="Holding cost" value={s.holdingCost} />
+              <Tile label="Established cost" value={s.establishmentCost} />
+              <Tile label="Direct cost" value={s.directCost} />
+              <Tile label="Overheads" value={s.overheadCost} />
+              <Tile label="Full cost" value={s.fullCost} total full />
+            </>
+          ) : (
+            <Tile label="Total cost" value={s.totalCost} total />
+          )}
           {s.contractValue !== undefined ? (
             <>
               <Tile label="Contract value" value={s.contractValue} />
               <div className={styles.tile}>
-                <div className={styles.figLabel}>Margin</div>
+                <div className={styles.figLabel}>{full ? "Margin (full cost)" : "Margin"}</div>
                 <div className={`${styles.tileValue} ${s.margin?.startsWith("-") ? styles.negative : ""}`}>{s.margin === null || s.margin === undefined ? "—" : formatMoney(s.margin)}</div>
                 <div className={styles.meta}>{s.marginPercent ? `${s.marginPercent}% of contract` : "No contract value"}</div>
+                {full && s.directMargin !== undefined && s.directMargin !== null ? (
+                  <div className={styles.meta}>
+                    Direct margin <span className={s.directMargin.startsWith("-") ? styles.negative : undefined}>{formatMoney(s.directMargin)}</span>
+                    {s.directMarginPercent ? ` (${s.directMarginPercent}%)` : ""}
+                  </div>
+                ) : null}
               </div>
             </>
           ) : null}
@@ -212,7 +231,7 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
       {used !== null ? (
         <div className={styles.usage} aria-label="Cost used versus contract value">
           <div className={styles.usageHead}>
-            <span>Cost used vs contract</span>
+            <span>{full ? "Full cost used vs contract" : "Cost used vs contract"}</span>
             <strong>{s.costUsedPercent}%</strong>
           </div>
           <div className={styles.track}>
@@ -228,7 +247,7 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
         items={[
           { key: "material", label: "Material used" },
           { key: "movements", label: "Issue / return history" },
-          { key: "costs", label: `Labour, transport & other${costCount !== null ? ` (${costCount})` : ""}` },
+          { key: "costs", label: `${p.actions.seeOverheads ? "Other costs & overheads" : "Labour, transport & other"}${costCount !== null ? ` (${costCount})` : ""}` },
           { key: "documents", label: "Documents" },
           { key: "activity", label: "Activity" },
         ]}
@@ -270,9 +289,9 @@ function Info({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-function Tile({ label, value, total }: { label: string; value: string | null | undefined; total?: boolean }) {
+function Tile({ label, value, total, full }: { label: string; value: string | null | undefined; total?: boolean; full?: boolean }) {
   return (
-    <div className={`${styles.tile} ${total ? styles.tileTotal : ""}`}>
+    <div className={[styles.tile, total ? styles.tileTotal : "", full ? styles.tileFull : ""].filter(Boolean).join(" ")}>
       <div className={styles.figLabel}>{label}</div>
       <div className={styles.tileValue}>{value === null || value === undefined ? "—" : formatMoney(value)}</div>
     </div>

@@ -185,6 +185,7 @@ export function RolesTab({ roles, reloadRoles, notify }: { roles: RoleDto[]; rel
                 <SelectField
                   key={m}
                   label={MODULE_LABELS[m]}
+                  helper={m === "overheads" ? "Store charge, holding and established cost. Amounts also need “See cost”." : undefined}
                   value={draft.permissions[m]}
                   disabled={selected.isLocked}
                   onChange={(e) => setDraft({ ...draft, permissions: { ...draft.permissions, [m]: e.target.value } })}

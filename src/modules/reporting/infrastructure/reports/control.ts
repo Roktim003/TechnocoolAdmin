@@ -3,7 +3,7 @@ import { ENTRY_TYPE_META, ENTRY_TYPES } from "@/modules/inventory/domain/types";
 import { summarizeChanges } from "../../domain/changes";
 import { dhakaDate } from "../../domain/schedule";
 import type { ReportRow, TagStyle } from "../../domain/types";
-import { hiddenFieldNames } from "../../domain/visibility";
+import { hiddenFieldNames, seesOverheads } from "../../domain/visibility";
 import { countCol, countTotal, date, dateCol, defineReport, moneyCol, moneyTotal, str, tagCol, text, rowsOnly } from "../columns";
 import { dhakaDay, int, isoDate, like, money, orderBy, sql, uuidArray, where, zeroMoney } from "../sql";
 import { P } from "./common";
@@ -132,10 +132,31 @@ const RECORDS: Record<string, { table: string; label: string; link?: (id: string
   User: { table: `SELECT id::text, username AS label FROM "User"`, label: "User", link: () => `/users` },
   Role: { table: `SELECT id::text, name AS label FROM "Role"`, label: "Role", link: () => `/users?tab=roles` },
   Warehouse: { table: `SELECT id::text, code AS label FROM "Warehouse"`, label: "Warehouse" },
+  WarehouseCost: { table: `SELECT id::text, to_char(month, 'YYYY-MM') || ' · ' || initcap(replace(category::text, '_', ' ')) AS label FROM "WarehouseCost"`, label: "Overhead cost", link: () => `/warehouse-costs` },
 };
 
+/**
+ * Audit rows about overheads, hidden from viewers without overhead access: project overhead
+ * lines (`project.overhead_*`), receipts attached to them, and the overhead register
+ * (`warehouse_cost.*`, record type WarehouseCost).
+ */
+const overheadRows = sql`(
+  starts_with(a.action, 'project.overhead_') OR starts_with(a.action, 'warehouse_cost.') OR a."entityType" = 'WarehouseCost'
+  OR (starts_with(a.action, 'project.cost_receipt_') AND EXISTS (
+    SELECT 1 FROM "ProjectCost" pc
+    WHERE pc.id::text = COALESCE(a.after->>'costId', a.before->>'costId') AND pc.category IN ('STORE_CHARGE', 'HOLDING', 'ESTABLISHMENT')
+  ))
+)`;
+
 export const auditLog = defineReport({
-  meta: { id: "audit-log", number: 14, title: "Audit log", group: "Control", description: "Who changed what and when: every audited action with the record it touched and a before → after summary of the key fields (cost, profit and margin fields only if you may see them).", landscape: true },
+  meta: {
+    id: "audit-log",
+    number: 14,
+    title: "Audit log",
+    group: "Control",
+    description: "Who changed what and when: every audited action with the record it touched and a before → after summary of the key fields (cost, profit and margin fields only if you may see them; overhead entries only with overhead access).",
+    landscape: true,
+  },
   params: [{ ...P.dateFrom("-7d") }, P.dateTo(), P.user, { key: "entityType", label: "Record type", kind: "text", placeholder: "e.g. StockEntry, PurchaseOrder, Project" }, { key: "action", label: "Action", kind: "text", placeholder: "e.g. approve, stock_entry.post" }],
   sortFields: ["at", "user", "action"],
   defaultSort: "-at",
@@ -158,6 +179,7 @@ export const auditLog = defineReport({
       str(p, "userId") ? sql`a."userId" = ${str(p, "userId")}::uuid` : null,
       str(p, "entityType") ? sql`a."entityType" = ${str(p, "entityType")}` : null,
       action ? sql`a.action ILIKE ${like(action)}` : null,
+      seesOverheads(ctx.viewer.flags) ? null : sql`NOT ${overheadRows}`,
     ]);
     const fromSql = sql`FROM "AuditLog" a LEFT JOIN "User" u ON u.id = a."userId" WHERE ${cond}`;
     const sort = orderBy(req.sort, { at: sql`a."createdAt"`, user: sql`u.name`, action: sql`a.action` }, sql`a.id`);

@@ -1,6 +1,21 @@
-import { BusinessRuleError, ConflictError, ForbiddenError, ValidationError } from "@/shared/errors/app-error";
+import { AppError, BusinessRuleError, ConflictError, ForbiddenError, ValidationError } from "@/shared/errors/app-error";
+import { missingText, type DocChecklistItem } from "./import-docs";
 
 export const InventoryErrors = {
+  /** 422: required import documents need a number and at least one file before posting. */
+  importDocsMissing: (missing: DocChecklistItem[]) =>
+    new AppError(
+      "BUSINESS_RULE",
+      422,
+      `Import documents missing before posting: ${missing.map((m) => m.label).join(", ")}.`,
+      missing.map((m) => ({ code: "IMPORT_DOCS_MISSING", path: `importShipment.${m.docType}`, message: missingText(m), meta: { docType: m.docType, numberFilled: String(m.numberFilled), fileCount: String(m.fileCount) } })),
+    ),
+  importDocsNotAllowed: (what = "Import documents") => new ValidationError(`${what} only apply to GRN (Imported) entries.`, [{ path: "importShipment", message: `${what} only apply to GRN (Imported) entries.`, code: "IMPORT_DOCS_NOT_ALLOWED" }]),
+  importDocsForbidden: (why: string) => new ForbiddenError(why),
+  importFileType: () => new ValidationError("Import documents must be PDF, JPG or PNG files.", [{ path: "file", message: "Only PDF, JPG and PNG files are allowed.", code: "INVALID_FILE_TYPE" }]),
+  importFileLimit: (docType: string, max: number) =>
+    new BusinessRuleError(`A document can have at most ${max} files (${docType}).`, "ATTACHMENT_LIMIT", { path: "file", meta: { docType, max: String(max) } }),
+  deleteReasonRequired: () => new ValidationError("Give a reason to remove a file from a posted entry.", [{ path: "reason", message: "Reason is required.", code: "REASON_REQUIRED" }]),
   insufficientStock: (code: string, available: string, requested: string, warehouse: string, condition = "GOOD") =>
     new BusinessRuleError(
       `Not enough ${condition === "DAMAGED" ? "damaged " : ""}stock of ${code} in ${warehouse}: ${available} available, ${requested} requested.`,

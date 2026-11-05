@@ -1,54 +1,58 @@
+/* Gr8r Studio inputs: bordered, 6px radius; focus = accent border + 3px accent-soft halo. */
 .field {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 6px;
   min-width: 0;
 }
 
 .label {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--color-text-secondary);
-  letter-spacing: 0.16px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text);
   padding: 0;
 }
 
 .input {
   width: 100%;
-  height: var(--field-height);
-  padding: 0 var(--space-5);
-  background: var(--color-field);
-  border: none;
-  border-bottom: 1px solid var(--color-border-strong);
-  border-radius: var(--radius);
-  font-size: var(--text-md);
-  color: var(--color-text-primary);
-  outline: 2px solid transparent;
-  outline-offset: -2px;
-  transition: background-color 70ms ease, outline 70ms ease;
+  height: var(--h-md);
+  padding: 0 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  font-size: var(--fs);
+  color: var(--text);
+  transition:
+    border-color var(--dur),
+    box-shadow var(--dur);
 }
 
 .input::placeholder {
-  color: var(--color-text-placeholder);
+  color: var(--text-3);
 }
 
-.input:hover:not(:disabled) {
-  background: var(--color-field-hover);
+.input:hover:not(:disabled):not(:focus) {
+  border-color: color-mix(in srgb, var(--border-strong) 60%, var(--text-3));
 }
 
-.input:focus {
-  outline: var(--focus-ring);
+.input:focus,
+.input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
 }
 
 .input:disabled {
-  color: var(--color-text-disabled);
-  border-bottom-color: transparent;
+  background: var(--surface-2);
+  color: var(--text-3);
   cursor: not-allowed;
 }
 
 .invalid,
-.invalid:focus {
-  outline: 2px solid var(--color-error);
+.invalid:focus,
+.invalid:hover:not(:disabled):not(:focus) {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px var(--red-soft);
 }
 
 .mono {
@@ -56,32 +60,28 @@
 }
 
 .select {
-  appearance: none;
-  padding-right: var(--space-8);
+  padding-right: 8px;
   cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='%23161616' d='M8 11 3 6l.7-.7L8 9.6l4.3-4.3L13 6z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right var(--space-4) center;
 }
 
 .helper,
 .error {
-  font-size: var(--text-xs);
-  line-height: 1.34;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
 }
 
 .helper {
-  color: var(--color-text-secondary);
+  color: var(--text-3);
 }
 
 .error {
-  color: var(--color-error);
+  color: var(--red);
 }
 
 .group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--s-2);
   margin: 0;
   padding: 0;
   border: none;
@@ -89,42 +89,50 @@
 }
 
 .group > .label {
-  margin-bottom: var(--space-2);
+  margin-bottom: 2px;
 }
 
 .checkboxRow {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  min-height: 24px;
+  gap: var(--s-2);
+  min-height: 22px;
 }
 
 .checkbox {
   appearance: none;
   flex: none;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   margin: 0;
-  border: 1px solid var(--color-text-primary);
-  border-radius: 1px;
-  background: var(--color-surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--r-xs);
+  background: var(--surface);
   cursor: pointer;
-  display: grid;
+  display: inline-grid;
   place-content: center;
+  transition:
+    background var(--dur),
+    border-color var(--dur);
+}
+
+.checkbox:hover:not(:disabled) {
+  border-color: var(--text-4);
 }
 
 .checkbox::before {
   content: "";
-  width: 9px;
+  width: 8px;
   height: 5px;
-  border-left: 2px solid var(--color-text-on-color);
-  border-bottom: 2px solid var(--color-text-on-color);
+  border-left: 1.8px solid var(--on-accent);
+  border-bottom: 1.8px solid var(--on-accent);
   transform: rotate(-45deg) translate(1px, -1px);
   opacity: 0;
 }
 
 .checkbox:checked {
-  background: var(--color-text-primary);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .checkbox:checked::before {
@@ -132,27 +140,23 @@
 }
 
 .checkbox:focus-visible {
-  outline: var(--focus-ring);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
 .checkbox:disabled {
-  border-color: var(--color-disabled-bg);
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
-.checkbox:disabled:checked {
-  background: var(--color-disabled-bg);
-}
-
 .checkboxLabel {
-  font-size: var(--text-md);
+  font-size: var(--fs);
   cursor: pointer;
 }
 
 @media (max-width: 671px) {
   .input {
-    height: var(--touch-target);
+    height: var(--h-lg);
   }
   .checkboxRow {
     min-height: var(--touch-target);
@@ -161,69 +165,70 @@
 
 .textarea {
   height: auto;
-  min-height: 80px;
-  padding: var(--space-4) var(--space-5);
+  min-height: 72px;
+  padding: 8px 10px;
   resize: vertical;
-  line-height: var(--line-height);
+  line-height: 1.5;
 }
 
 .toggleRow {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-4);
+  gap: var(--s-3);
 }
 
 .toggle {
   flex: none;
   position: relative;
-  width: 48px;
-  height: 24px;
-  margin-top: 2px;
+  width: 30px;
+  height: 18px;
+  margin-top: 1px;
   padding: 0;
   border: none;
-  border-radius: var(--radius-pill);
-  background: var(--color-border-strong);
+  border-radius: 9px;
+  background: var(--border-strong);
   cursor: pointer;
-  transition: background-color 70ms ease;
+  transition: background var(--dur);
 }
 
 .toggleKnob {
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-pill);
-  background: var(--color-surface);
-  transition: transform 70ms ease;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform var(--dur) var(--ease);
 }
 
 .toggleOn {
-  background: var(--color-success);
+  background: var(--accent);
 }
 
 .toggleOn .toggleKnob {
-  transform: translateX(24px);
+  transform: translateX(12px);
 }
 
 .toggle:focus-visible {
-  outline: var(--focus-ring);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 .toggle:disabled {
-  background: var(--color-disabled-bg);
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
 .toggleLabel {
-  font-size: var(--text-md);
-  color: var(--color-text-primary);
+  font-size: var(--fs);
+  color: var(--text);
   cursor: pointer;
 }
 
 .toggleState {
-  margin-left: var(--space-3);
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
+  margin-left: var(--s-2);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
 }
