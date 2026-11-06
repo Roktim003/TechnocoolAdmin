@@ -1,4 +1,6 @@
+import Image from "next/image";
 import Link from "next/link";
+import { APP_NAME } from "@/shared/config/constants";
 import { ConfirmHost } from "@/components/ui/ConfirmDialog";
 import { Icon } from "@/components/ui/Icon";
 import { HeaderActions, UserMenu } from "./HeaderActions";
@@ -24,10 +26,8 @@ export function AppShell({ user, nav, canSearchUsers, children }: AppShellProps)
       <aside id="app-sidebar" className={styles.side} data-print="hide">
         <div className={styles.sideTop}>
           <Link href="/dashboard" className={styles.brand}>
-            <span className={styles.logo} aria-hidden="true">
-              SB
-            </span>
-            <span className={styles.brandName}>StockBook</span>
+            <Image src="/brand/logo-64.png" alt="" width={28} height={28} className={styles.logo} priority />
+            <span className={styles.brandName}>{APP_NAME}</span>
           </Link>
         </div>
         <SideNav items={nav} />

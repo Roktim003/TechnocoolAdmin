@@ -30,7 +30,7 @@ const bytes = async (wb: ExcelJS.Workbook) => new Uint8Array(await wb.xlsx.write
 export const openingSheets: OpeningSheets = {
   async template(warehouses, products) {
     const wb = new ExcelJS.Workbook();
-    wb.creator = "StockBook";
+    wb.creator = "TechnoCool Inventory";
     const ws = wb.addWorksheet("Opening stock", { views: [{ state: "frozen", ySplit: 1 }] });
     ws.columns = OPENING_COLUMNS.map((c) => ({ header: c.required ? `${c.header} *` : c.header, key: c.key, width: c.width }));
     header(ws);
@@ -125,7 +125,7 @@ export const openingSheets: OpeningSheets = {
 /** Low-stock list as .xlsx (the same columns as the screen). */
 export async function lowStockWorkbook(rows: LowStockRow[], warehouseCodes: string[]): Promise<Uint8Array> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "StockBook";
+  wb.creator = "TechnoCool Inventory";
   const ws = wb.addWorksheet("Low stock", { views: [{ state: "frozen", ySplit: 1 }] });
   ws.columns = [
     { header: "Code", key: "code", width: 20 },

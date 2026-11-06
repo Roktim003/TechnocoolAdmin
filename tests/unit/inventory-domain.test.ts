@@ -137,7 +137,7 @@ describe("email template", () => {
     expect(html).toContain("Body &amp; more");
     expect(html).toContain('href="https://x.example/stock/1"');
     expect(html).toContain("#0f62fe");
-    expect(text).toContain("Open in StockBook: https://x.example/stock/1");
+    expect(text).toContain("Open in TechnoCool Inventory: https://x.example/stock/1");
     expect(text).toContain("X-1 | 3");
   });
 });

@@ -6,9 +6,9 @@ const num = (v: string | null) => (v === null ? null : Number(v));
 /** The monthly overhead summary as an Excel workbook (one row per month and warehouse, plus the company row). */
 export async function summaryWorkbook(s: { monthFrom: string; monthTo: string; months: MonthlySummary[] }, meta: { generatedBy: string; generatedAt: string }): Promise<Uint8Array> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "StockBook";
+  wb.creator = "TechnoCool Inventory";
   const ws = wb.addWorksheet("Overheads by month");
-  ws.addRow(["StockBook — Warehouse costs: monthly summary"]).font = { bold: true, size: 14 };
+  ws.addRow(["TechnoCool Inventory — Warehouse costs: monthly summary"]).font = { bold: true, size: 14 };
   ws.addRow([`Months ${s.monthFrom.slice(0, 7)} to ${s.monthTo.slice(0, 7)}`]);
   ws.addRow([`Generated ${meta.generatedAt} (Asia/Dhaka) by ${meta.generatedBy}. Overheads never change stock value.`]);
   ws.addRow([]);

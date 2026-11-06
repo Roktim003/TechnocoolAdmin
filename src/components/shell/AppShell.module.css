@@ -58,18 +58,14 @@
   background: var(--surface-3);
 }
 
+/* Techno Cool Associates logo (square, blue). */
 .logo {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
+  display: block;
+  width: 28px;
+  height: 28px;
   flex: none;
-  border-radius: 6px;
-  background: var(--text);
-  color: var(--bg);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  border-radius: 5px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .brandName {

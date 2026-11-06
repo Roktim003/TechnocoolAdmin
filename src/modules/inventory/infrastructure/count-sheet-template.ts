@@ -1,3 +1,4 @@
+import { LOGO_DATA_URI } from "@/shared/brand/logo-data";
 import type { CountRecord } from "../application/count.service";
 
 const esc = (v: unknown) =>
@@ -39,6 +40,8 @@ export function renderCountSheetHtml(c: CountRecord, opts: { showSystem: boolean
   body { font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 10.5px; color: #161616; margin: 0; }
   .head { display: flex; justify-content: space-between; border-bottom: 2px solid #161616; padding-bottom: 8px; }
   .company { font-size: 15px; font-weight: 600; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 46px; height: 46px; flex: none; border-radius: 4px; }
   h1 { font-size: 19px; font-weight: 400; margin: 0; text-align: right; }
   .no { font-family: "IBM Plex Mono", Consolas, monospace; text-align: right; margin-top: 4px; }
   .meta { display: flex; gap: 28px; margin: 10px 0; }
@@ -62,7 +65,7 @@ export function renderCountSheetHtml(c: CountRecord, opts: { showSystem: boolean
   .foot { position: fixed; bottom: 0; left: 0; right: 0; font-size: 8px; color: #8d8d8d; display: flex; justify-content: space-between; }
 </style></head>
 <body>
-<div class="head"><div><div class="company">${esc(opts.companyName)}</div><div>${esc(c.warehouse.name)}</div></div><div><h1>Stock count sheet</h1><div class="no">${esc(c.number)}</div></div></div>
+<div class="head"><div class="brand"><img class="logo" src="${LOGO_DATA_URI}" alt=""><div><div class="company">${esc(opts.companyName)}</div><div>${esc(c.warehouse.name)}</div></div></div><div><h1>Stock count sheet</h1><div class="no">${esc(c.number)}</div></div></div>
 <div class="meta">
   <div><span>Warehouse</span>${esc(c.warehouse.name)}</div>
   <div><span>Scope</span>${esc(c.scope.replace(/_/g, " ").toLowerCase())}</div>
@@ -76,6 +79,6 @@ ${c.blindCount && !opts.showSystem ? `<div class="blind">Blind count: count what
   <tbody>${rows}</tbody>
 </table>
 <div class="sign"><div>Counted by</div><div>Checked by</div><div>Approved by</div></div>
-<div class="foot"><span>StockBook · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(c.number)}</span></div>
+<div class="foot"><span>TechnoCool Inventory · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(c.number)}</span></div>
 </body></html>`;
 }

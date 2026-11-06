@@ -57,7 +57,7 @@ export async function processPoDocumentJob(job: Job, log: Logger) {
         "Please confirm receipt of this order.",
         `${companyName}`,
       ],
-      footer: `Sent by ${companyName} via StockBook on behalf of ${data.userName}.`,
+      footer: `Sent by ${companyName} via TechnoCool Inventory on behalf of ${data.userName}.`,
     });
     emailLogId = await notifications().service.queueEmail(
       { to: data.email.to, cc: data.email.cc, subject: `Purchase order ${no} — ${companyName}`, ...content, attachments: [{ filename: fileName, fileKey: data.fileKey, contentType: "application/pdf" }] },

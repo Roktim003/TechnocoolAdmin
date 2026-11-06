@@ -1,3 +1,4 @@
+import { LOGO_DATA_URI } from "@/shared/brand/logo-data";
 import type { PoRecord } from "../application/ports";
 
 const esc = (v: unknown) =>
@@ -64,6 +65,8 @@ export function renderPoHtml(po: PoRecord, opts: { showPrices: boolean; companyN
   body { font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 11px; color: #161616; margin: 0; }
   .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #161616; padding-bottom: 10px; }
   .company { font-size: 16px; font-weight: 600; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 46px; height: 46px; flex: none; border-radius: 4px; }
   h1 { font-size: 20px; font-weight: 400; margin: 0; text-align: right; }
   .no { font-family: "IBM Plex Mono", Consolas, monospace; font-size: 13px; text-align: right; margin-top: 4px; }
   .blocks { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 14px 0; }
@@ -90,7 +93,7 @@ export function renderPoHtml(po: PoRecord, opts: { showPrices: boolean; companyN
 <body>
 ${watermark}
 <div class="head">
-  <div><div class="company">${esc(opts.companyName)}</div>${opts.companyAddress ? `<div>${esc(opts.companyAddress)}</div>` : ""}</div>
+  <div class="brand"><img class="logo" src="${LOGO_DATA_URI}" alt=""><div><div class="company">${esc(opts.companyName)}</div>${opts.companyAddress ? `<div>${esc(opts.companyAddress)}</div>` : ""}</div></div>
   <div><h1>Purchase Order</h1><div class="no">${esc(no)}${po.revision ? ` · Rev ${po.revision}` : ""}</div></div>
 </div>
 <div class="blocks">
@@ -108,6 +111,6 @@ ${totals ? `<table class="totals">${totals}</table>` : ""}
 ${po.terms ? `<div class="terms"><span class="label">Terms &amp; conditions</span><p>${esc(po.terms)}</p></div>` : ""}
 ${po.notes ? `<div class="terms"><span class="label">Notes</span><p>${esc(po.notes)}</p></div>` : ""}
 <div class="sign"><div>Prepared by<br>${esc(po.createdBy.name)}</div><div>Approved by${po.approvedBy ? `<br>${esc(po.approvedBy.name)}` : ""}</div><div>Supplier acceptance</div></div>
-<div class="foot"><span>StockBook · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(no)}</span></div>
+<div class="foot"><span>TechnoCool Inventory · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(no)}</span></div>
 </body></html>`;
 }

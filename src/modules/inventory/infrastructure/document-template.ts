@@ -1,3 +1,4 @@
+import { LOGO_DATA_URI } from "@/shared/brand/logo-data";
 import type { DocumentKind } from "../application/dto";
 import type { EntryRecord } from "../application/ports";
 import { EMPTY_SHIPMENT, IMPORT_DOC_META, IMPORT_DOC_TYPES, type AttachmentDocType, type ImportDocType, type ImportShipmentData } from "../domain/import-docs";
@@ -154,6 +155,8 @@ export function renderDocumentHtml(e: EntryRecord, kind: DocumentKind, opts: { s
   body { font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 11px; color: #161616; margin: 0; }
   .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #161616; padding-bottom: 10px; }
   .company { font-size: 16px; font-weight: 600; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 46px; height: 46px; flex: none; border-radius: 4px; }
   h1 { font-size: 20px; font-weight: 400; margin: 0; text-align: right; }
   .no { font-family: "IBM Plex Mono", Consolas, monospace; font-size: 13px; text-align: right; margin-top: 4px; }
   .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin: 14px 0; }
@@ -178,7 +181,7 @@ export function renderDocumentHtml(e: EntryRecord, kind: DocumentKind, opts: { s
 <body>
 ${statusNote}
 <div class="head">
-  <div><div class="company">${esc(opts.companyName)}</div><div>${esc(e.warehouse.name)}</div></div>
+  <div class="brand"><img class="logo" src="${LOGO_DATA_URI}" alt=""><div><div class="company">${esc(opts.companyName)}</div><div>${esc(e.warehouse.name)}</div></div></div>
   <div><h1>${esc(title)}</h1><div class="no">${esc(e.number ?? e.draftRef)}</div></div>
 </div>
 <div class="meta">
@@ -196,6 +199,6 @@ ${totals ? `<table class="totals">${totals}</table>` : ""}
 ${isImport ? shipmentBlock(e.importShipment, opts.importFiles ?? [], opts.showCost) : ""}
 ${e.description || e.notes ? `<div class="notes">${esc([e.description, e.notes].filter(Boolean).join("\n"))}</div>` : ""}
 <div class="sign"><div>Prepared by<br>${esc(e.createdBy.name)}</div><div>${isChallan ? "Received by" : "Checked by"}${e.verifiedBy ? `<br>${esc(e.verifiedBy.name)}` : ""}</div><div>Authorised signature</div></div>
-<div class="foot"><span>StockBook · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(e.number ?? e.draftRef)}</span></div>
+<div class="foot"><span>TechnoCool Inventory · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(e.number ?? e.draftRef)}</span></div>
 </body></html>`;
 }

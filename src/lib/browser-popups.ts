@@ -99,7 +99,7 @@ export function anyTabFocused(): boolean {
 /** Shows one pop-up. The tag (notification id) stops two tabs from showing the same one twice. */
 export function showPopup(n: { id: string; title: string; body: string }, onClick: () => void) {
   try {
-    const p = new Notification(n.title, { body: n.body, tag: n.id, icon: "/notification-icon.png", badge: "/notification-icon.png" });
+    const p = new Notification(n.title, { body: n.body, tag: n.id, icon: "/brand/icon-192.png", badge: "/brand/icon-192.png" });
     p.onclick = () => {
       window.focus();
       p.close();

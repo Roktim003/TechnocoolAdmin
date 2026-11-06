@@ -59,7 +59,7 @@ export const excelSpreadsheet: Spreadsheet = {
 
   async buildTemplate(lists: ReferenceLists, includeCost) {
     const wb = new ExcelJS.Workbook();
-    wb.creator = "StockBook";
+    wb.creator = "TechnoCool Inventory";
     const ws = wb.addWorksheet("Products", { views: [{ state: "frozen", ySplit: 1 }] });
     const cols = columns(includeCost);
     ws.columns = cols.map((c) => ({ header: c.required ? `${c.header} *` : c.header, key: c.key, width: c.width }));
@@ -112,7 +112,7 @@ export const excelSpreadsheet: Spreadsheet = {
 
   async buildExport(products: Product[], includeCost) {
     const wb = new ExcelJS.Workbook();
-    wb.creator = "StockBook";
+    wb.creator = "TechnoCool Inventory";
     const ws = wb.addWorksheet("Products", { views: [{ state: "frozen", ySplit: 1 }] });
     const cols = [...columns(includeCost), { key: "status", header: "Status", width: 14 }, { key: "updatedAt", header: "Last updated (Asia/Dhaka)", width: 22 }];
     ws.columns = cols.map((c) => ({ header: c.header, key: c.key, width: c.width }));

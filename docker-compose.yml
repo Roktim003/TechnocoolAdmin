@@ -38,8 +38,8 @@ x-app-env: &app-env
   SMTP_SECURE: ${SMTP_SECURE:-false}
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-  SMTP_FROM: ${SMTP_FROM:-StockBook <no-reply@stockbook.local>}
-  COMPANY_NAME: ${COMPANY_NAME:-StockBook}
+  SMTP_FROM: ${SMTP_FROM:-TechnoCool Inventory <no-reply@stockbook.local>}
+  COMPANY_NAME: ${COMPANY_NAME:-Techno Cool Associates}
 
 name: stockbook
 

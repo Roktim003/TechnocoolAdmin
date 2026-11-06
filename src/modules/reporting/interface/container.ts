@@ -68,7 +68,7 @@ const viewers: ViewerSource = {
 
 const mailer: ReportMailer = {
   async send(to, subject, content, attachments) {
-    const { html, text } = renderEmail({ ...content, footer: "Sent by StockBook scheduled reports. Ask the schedule's owner to change or stop it." });
+    const { html, text } = renderEmail({ ...content, footer: "Sent by TechnoCool Inventory scheduled reports. Ask the schedule's owner to change or stop it." });
     await notifications().service.queueEmail({ to, subject, html, text, attachments }, null);
   },
   async notifyAdmins(title, body, link) {

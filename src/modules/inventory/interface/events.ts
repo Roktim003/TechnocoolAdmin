@@ -158,7 +158,7 @@ export const alertNotifier: AlertNotifier = {
       linkLabel: "Open the low-stock list",
     });
     for (const user of await digestRecipients(userIds)) {
-      await service.queueEmail({ to: user, subject: `StockBook low-stock digest — ${date}`, html, text }, "LOW_STOCK_DIGEST");
+      await service.queueEmail({ to: user, subject: `TechnoCool Inventory low-stock digest — ${date}`, html, text }, "LOW_STOCK_DIGEST");
       emailed++;
     }
     return emailed;

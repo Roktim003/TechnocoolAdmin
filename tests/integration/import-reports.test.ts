@@ -76,7 +76,7 @@ const keysOf = (r: { report: any }) => r.report.columns.map((c: any) => c.key);
 async function reportFile(userId: string, reportId: string, format: "xlsx" | "pdf", params: Record<string, string> = {}) {
   const v = viewerOf((await principalForUser(userId))!);
   let html = "";
-  const files = new ReportFiles({ reports: reporting().reports, writer: { xlsx: writeXlsx, pdf: async (input) => new TextEncoder().encode((html = await reportHtml(input))) }, companyName: () => "StockBook" });
+  const files = new ReportFiles({ reports: reporting().reports, writer: { xlsx: writeXlsx, pdf: async (input) => new TextEncoder().encode((html = await reportHtml(input))) }, companyName: () => "TechnoCool Inventory" });
   const built = await files.build(await reporting().reports.prepare(v, reportId, params), format, v.name);
   return { bytes: built.bytes, html };
 }
@@ -282,7 +282,7 @@ describe("BL / B/E numbers in other reports", () => {
 });
 
 describe("GRN PDF (template)", () => {
-  const meta = { companyName: "StockBook", printedBy: "Test Admin", printedAt: "05 Nov 2026, 10:00" };
+  const meta = { companyName: "TechnoCool Inventory", printedBy: "Test Admin", printedAt: "05 Nov 2026, 10:00" };
   async function html(entryId: string, showCost: boolean) {
     const e = (await inventory().uow.store.entry(entryId))!;
     const files = (await inventory().uow.store.attachments("StockEntry", entryId)).filter((a) => a.docType).map((a) => ({ docType: a.docType!, fileName: a.fileName }));

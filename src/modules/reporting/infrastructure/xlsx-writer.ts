@@ -54,7 +54,7 @@ export async function writeXlsx(input: ReportFileInput): Promise<Uint8Array> {
   });
 
   const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream, useStyles: true, useSharedStrings: false });
-  wb.creator = "StockBook";
+  wb.creator = "TechnoCool Inventory";
   wb.created = input.generatedAt;
 
   const cols = input.columns;
@@ -71,7 +71,7 @@ export async function writeXlsx(input: ReportFileInput): Promise<Uint8Array> {
     if (width > 1) ws.mergeCells(row.number, 1, row.number, width);
     row.commit();
   };
-  block(input.companyName && input.companyName !== "StockBook" ? `StockBook · ${input.companyName}` : "StockBook", { bold: true, size: 14 });
+  block(input.companyName && input.companyName !== "TechnoCool Inventory" ? `TechnoCool Inventory · ${input.companyName}` : "TechnoCool Inventory", { bold: true, size: 14 });
   block(input.meta.title, { bold: true, size: 12 });
   block(input.filters.length ? `Filters: ${input.filters.map((f) => `${f.label}: ${f.value}`).join(" · ")}` : "Filters: none", { size: 10, color: { argb: "FF525252" } });
   block(`Generated ${formatDateValue(input.generatedAt.toISOString(), true)} (Asia/Dhaka) by ${input.generatedBy}`, { size: 10, color: { argb: "FF525252" } });

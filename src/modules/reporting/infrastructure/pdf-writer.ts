@@ -1,3 +1,4 @@
+import { LOGO_DATA_URI } from "@/shared/brand/logo-data";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { htmlToPdf } from "@/modules/inventory/infrastructure/pdf";
@@ -64,6 +65,8 @@ export async function reportHtml(input: ReportFileInput): Promise<string> {
   body { font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 9.5px; color: #161616; margin: 0; }
   header { border-bottom: 2px solid #161616; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; }
   .company { font-size: 14px; font-weight: 600; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 46px; height: 46px; flex: none; border-radius: 4px; }
   h1 { font-size: 18px; font-weight: 400; margin: 2px 0 0; }
   .gen { font-size: 8.5px; color: #525252; text-align: right; }
   .filters { font-size: 8.5px; color: #525252; margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
@@ -86,7 +89,7 @@ export async function reportHtml(input: ReportFileInput): Promise<string> {
   .empty { padding: 16px; text-align: center; color: #525252; }
   .note { margin-top: 8px; font-size: 8.5px; color: #8a3800; }
   </style></head><body>
-  <header><div><div class="company">StockBook${input.companyName && input.companyName !== "StockBook" ? ` · ${esc(input.companyName)}` : ""}</div><h1>${esc(input.meta.title)}</h1></div>
+  <header><div class="brand"><img class="logo" src="${LOGO_DATA_URI}" alt=""><div><div class="company">TechnoCool Inventory${input.companyName && input.companyName !== "TechnoCool Inventory" ? ` · ${esc(input.companyName)}` : ""}</div><h1>${esc(input.meta.title)}</h1></div></div>
   <div class="gen">Generated ${esc(formatDateValue(input.generatedAt.toISOString(), true))} (Asia/Dhaka)<br>by ${esc(input.generatedBy)}</div></header>
   <div class="filters">${filters}</div>
   ${tiles ? `<div class="tiles">${tiles}</div>` : ""}

@@ -53,7 +53,7 @@ const EnvSchema = z.object({
   SMTP_SECURE: bool,
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
-  SMTP_FROM: z.string().default("StockBook <no-reply@stockbook.local>"),
+  SMTP_FROM: z.string().default("TechnoCool Inventory <no-reply@stockbook.local>"),
   /** First retry delay for failed emails (doubles each attempt). */
   EMAIL_RETRY_DELAY_MS: z.coerce.number().int().nonnegative().default(30_000),
   EMAIL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),

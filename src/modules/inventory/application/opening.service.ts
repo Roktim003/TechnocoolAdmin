@@ -317,7 +317,7 @@ export class OpeningImportService {
     }
     const pairs = [...merged.values()].flatMap((r) => r.serials.map((serial) => ({ productId: r.productId, serial })));
     const existing = await store.openings.existingSerials(pairs);
-    for (const r of merged.values()) for (const s of r.serials) if (existing.has(`${r.productId}|${s}`)) errors.push({ row: r.rows[0]!, field: col("serialnumbers"), message: `Serial ${s} of ${r.productCode} already exists in StockBook.` });
+    for (const r of merged.values()) for (const s of r.serials) if (existing.has(`${r.productId}|${s}`)) errors.push({ row: r.rows[0]!, field: col("serialnumbers"), message: `Serial ${s} of ${r.productCode} already exists in TechnoCool Inventory.` });
 
     const rows = [...merged.values()];
     errors.sort((a, b) => a.row - b.row);
@@ -425,7 +425,7 @@ export class OpeningImportService {
       else if (!actor.warehouseIds.includes(w.id)) issues.push({ row, field: "Warehouse code", message: `You don't have access to warehouse ${r.warehouseCode}.` });
       const p = products.get(r.productId);
       if (!p || p.status !== "ACTIVE") issues.push({ row, field: "Product code", message: `Product ${r.productCode} is no longer active.` });
-      for (const s of r.serials) if (existing.has(`${r.productId}|${s}`)) issues.push({ row, field: "Serial numbers", message: `Serial ${s} of ${r.productCode} now exists in StockBook.` });
+      for (const s of r.serials) if (existing.has(`${r.productId}|${s}`)) issues.push({ row, field: "Serial numbers", message: `Serial ${s} of ${r.productCode} now exists in TechnoCool Inventory.` });
     }
     return issues;
   }

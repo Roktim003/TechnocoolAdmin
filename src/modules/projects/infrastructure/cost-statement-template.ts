@@ -1,3 +1,4 @@
+import { LOGO_DATA_URI } from "@/shared/brand/logo-data";
 import type { MaterialProduct } from "../application/costing.service";
 import type { CostRecord, ProjectRecord } from "../application/ports";
 import type { ProjectSummary } from "../domain/rules";
@@ -88,6 +89,8 @@ ${overheadRows ? `<table class="lines"><thead><tr><th>Date</th><th>Category</th>
   body { font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 11px; color: #161616; margin: 0; }
   .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #161616; padding-bottom: 10px; }
   .company { font-size: 16px; font-weight: 600; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 46px; height: 46px; flex: none; border-radius: 4px; }
   h1 { font-size: 20px; font-weight: 400; margin: 0; text-align: right; }
   .no { font-family: "IBM Plex Mono", Consolas, monospace; font-size: 13px; text-align: right; margin-top: 4px; }
   .title { font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
@@ -109,7 +112,7 @@ ${overheadRows ? `<table class="lines"><thead><tr><th>Date</th><th>Category</th>
 </style></head>
 <body>
 <div class="head">
-  <div><div class="company">${esc(opts.companyName)}</div>${opts.companyAddress ? `<div>${esc(opts.companyAddress)}</div>` : ""}</div>
+  <div class="brand"><img class="logo" src="${LOGO_DATA_URI}" alt=""><div><div class="company">${esc(opts.companyName)}</div>${opts.companyAddress ? `<div>${esc(opts.companyAddress)}</div>` : ""}</div></div>
   <div><h1>Project cost statement</h1><div class="no">${esc(p.code)}</div></div>
 </div>
 <div class="title">${esc(p.name)}</div>
@@ -141,6 +144,6 @@ ${overheads}
   ${overheadTotals}
 </table>
 ${margin}
-<div class="foot"><span>StockBook · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(p.code)}</span></div>
+<div class="foot"><span>TechnoCool Inventory · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(p.code)}</span></div>
 </body></html>`;
 }

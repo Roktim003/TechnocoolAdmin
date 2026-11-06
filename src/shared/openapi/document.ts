@@ -30,10 +30,10 @@ export function openApiDocument() {
   cached ??= new OpenApiGeneratorV31(registry.definitions).generateDocument({
     openapi: "3.1.0",
     info: {
-      title: "StockBook API",
+      title: "TechnoCool Inventory API",
       version: "1.0.0",
       description:
-        "REST API for StockBook (web + mobile). Success: `{ data, meta? }`. Error: `{ error: { code, message, details, requestId } }`. " +
+        "REST API for TechnoCool Inventory (web + mobile). Success: `{ data, meta? }`. Error: `{ error: { code, message, details, requestId } }`. " +
         "Every response carries an `X-Request-Id` header. Lists accept `page`, `pageSize` (≤100), `sort` (e.g. `name,-createdAt`), `q` and field filters. " +
         "Timezone: Asia/Dhaka. Currency: BDT.",
     },

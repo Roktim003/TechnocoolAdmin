@@ -58,7 +58,7 @@ export function Crumbs({ items }: { items: SideNavItem[] }) {
   const deeper = item && pathname !== item.href;
   return (
     <nav className={styles.crumbs} aria-label="Breadcrumb">
-      <Link href="/dashboard">StockBook</Link>
+      <Link href="/dashboard">TechnoCool Inventory</Link>
       {item ? (
         <>
           <Icon name="chevronRight" size={12} className={styles.crumbSep} />

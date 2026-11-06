@@ -56,7 +56,7 @@ export function NotificationPreferences() {
       <section className={styles.section}>
         <p className={styles.muted} style={{ marginBottom: "var(--space-5)" }}>
           In-app notifications (the bell) are always on. Choose which ones also come by email (you need an email address on your user) and as a push
-          notification on the phones where you use the StockBook app.
+          notification on the phones where you use the TechnoCool Inventory app.
         </p>
         <div className={styles.stack}>
           {prefs?.map((p) => (
@@ -84,9 +84,9 @@ export function NotificationPreferences() {
 }
 
 const POPUP_HELP: Record<PopupStatus, string> = {
-  on: "A pop-up appears on this computer for each new notification while StockBook is open in a tab you're not looking at. Click it to open the item.",
-  off: "Turn on to get a pop-up on this computer for each new notification while StockBook is open in a tab you're not looking at.",
-  ask: "Turn on to get a pop-up on this computer for each new notification while StockBook is open in a tab you're not looking at. Your browser will ask you to allow it.",
+  on: "A pop-up appears on this computer for each new notification while TechnoCool Inventory is open in a tab you're not looking at. Click it to open the item.",
+  off: "Turn on to get a pop-up on this computer for each new notification while TechnoCool Inventory is open in a tab you're not looking at.",
+  ask: "Turn on to get a pop-up on this computer for each new notification while TechnoCool Inventory is open in a tab you're not looking at. Your browser will ask you to allow it.",
   blocked: "Notifications are blocked for this site in your browser. Click the icon left of the address bar → Site settings → Notifications → Allow, then reload the page.",
   insecure: "Pop-ups need the site to be opened over HTTPS. Ask your administrator to use the https:// address.",
   unsupported: "This browser doesn't support desktop pop-ups. Use a current Chrome, Edge or Firefox.",
@@ -115,7 +115,7 @@ function BrowserPopups() {
       <div className={styles.toolbar}>
         <Toggle label="Show pop-ups" checked={status === "on"} disabled={!usable} onChange={(v) => (v ? void turnOnPopups().then(setStatus) : turnOffPopups())} />
         {status === "on" ? (
-          <Button kind="secondary" size="sm" onClick={() => showPopup({ id: "test", title: "StockBook pop-ups are on", body: "New notifications will appear like this." }, () => undefined)}>
+          <Button kind="secondary" size="sm" onClick={() => showPopup({ id: "test", title: "TechnoCool Inventory pop-ups are on", body: "New notifications will appear like this." }, () => undefined)}>
             Send a test pop-up
           </Button>
         ) : null}

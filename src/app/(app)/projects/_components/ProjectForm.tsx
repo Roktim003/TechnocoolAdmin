@@ -210,7 +210,7 @@ export function ProjectForm({ caps, warehouses, project, nextCode }: { caps: Pro
               {project?.siteEngineer && !users.some((u) => u.id === project.siteEngineer!.id) ? <option value={project.siteEngineer.id}>{project.siteEngineer.name}</option> : null}
             </SelectField>
           ) : (
-            <TextField label="Engineer (name)" value={f.siteEngineerName} onChange={(e) => set("siteEngineerName", e.target.value)} error={shownErrors.siteEngineerName} helper="Someone outside StockBook." />
+            <TextField label="Engineer (name)" value={f.siteEngineerName} onChange={(e) => set("siteEngineerName", e.target.value)} error={shownErrors.siteEngineerName} helper="Someone outside TechnoCool Inventory." />
           )}
           <TextAreaField label="Notes" rows={3} value={f.notes} onChange={(e) => set("notes", e.target.value)} error={shownErrors.notes} fieldClassName={styles.full} />
         </div>

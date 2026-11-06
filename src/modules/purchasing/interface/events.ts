@@ -79,7 +79,7 @@ export const purchasingNotifier: PurchasingNotifier = {
       const mine = pos.filter((p) => scope.has(p.deliverTo.id));
       if (!mine.length) continue;
       const content = overdueDigestContent(mine, today, date);
-      await service.queueEmail({ to: u.email!, subject: `StockBook — ${mine.length} overdue purchase order${mine.length === 1 ? "" : "s"} (${date})`, ...content }, "PO_OVERDUE_DIGEST");
+      await service.queueEmail({ to: u.email!, subject: `TechnoCool Inventory — ${mine.length} overdue purchase order${mine.length === 1 ? "" : "s"} (${date})`, ...content }, "PO_OVERDUE_DIGEST");
       emailed++;
     }
     return emailed;

@@ -64,7 +64,7 @@ const cellText = (ws: ExcelJS.Worksheet, r: number) => String(ws.getRow(r).getCe
 async function pdfHtml(userId: string, reportId: string) {
   const v = viewerOf((await principalForUser(userId))!);
   let html = "";
-  const files = new ReportFiles({ reports: reporting().reports, writer: { xlsx: writeXlsx, pdf: async (input) => new TextEncoder().encode((html = await reportHtml(input))) }, companyName: () => "StockBook" });
+  const files = new ReportFiles({ reports: reporting().reports, writer: { xlsx: writeXlsx, pdf: async (input) => new TextEncoder().encode((html = await reportHtml(input))) }, companyName: () => "TechnoCool Inventory" });
   await files.build(await reporting().reports.prepare(v, reportId, {}), "pdf", v.name);
   return html;
 }
@@ -94,7 +94,7 @@ describe("Excel export", () => {
     expect(job.fileName).toMatch(/^stock-summary-\d{4}-\d{2}-\d{2}\.xlsx$/);
     const wb = await workbook(bytes);
     const ws = wb.worksheets[0]!;
-    expect(cellText(ws, 1)).toBe("StockBook");
+    expect(cellText(ws, 1)).toBe("TechnoCool Inventory");
     expect(cellText(ws, 2)).toBe("Stock summary");
     expect(cellText(ws, 3)).toBe("Filters: Search: “INV”");
     expect(cellText(ws, 4)).toMatch(/^Generated \d{2} \w{3} \d{4}, \d{2}:\d{2} \(Asia\/Dhaka\) by /);

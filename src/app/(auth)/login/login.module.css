@@ -19,26 +19,37 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
+/* Techno Cool Associates logo. */
 .logo {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
+  display: block;
+  width: 56px;
+  height: 56px;
+  flex: none;
   border-radius: 8px;
-  background: var(--text);
-  color: var(--bg);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  box-shadow: var(--shadow-sm), 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.brandText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .brandName {
-  font-size: var(--fs-md);
+  font-size: var(--fs-lg);
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.brandCompany {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .panel {

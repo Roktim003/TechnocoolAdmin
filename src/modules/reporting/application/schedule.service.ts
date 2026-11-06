@@ -256,16 +256,16 @@ export class ScheduleService {
         for (const to of g.emails) {
           await this.d.mailer.send(
             to,
-            `StockBook — ${def.meta.title} (${dhakaDate(this.now())})`,
+            `TechnoCool Inventory — ${def.meta.title} (${dhakaDate(this.now())})`,
             {
               title: def.meta.title,
               paragraphs: [
                 `Your scheduled report is attached (${describeSchedule(s)}).`,
                 `Filters: ${(await this.d.reports.filters(p)).map((f) => `${f.label}: ${f.value}`).join(" · ") || "none"}.`,
-                `Scheduled by ${owner.name}. You only receive the columns and warehouses you are allowed to see in StockBook.`,
+                `Scheduled by ${owner.name}. You only receive the columns and warehouses you are allowed to see in TechnoCool Inventory.`,
               ],
               link: `${this.d.appUrl().replace(/\/$/, "")}/reports?r=${def.meta.id}`,
-              linkLabel: "Open the report in StockBook",
+              linkLabel: "Open the report in TechnoCool Inventory",
             },
             attachments,
           );
