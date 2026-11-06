@@ -81,7 +81,7 @@ export function CountList({ warehouses }: { warehouses: WarehouseDto[] }) {
                 </option>
               ))}
             </SelectField>
-            <SelectField label="Warehouse" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
+            <SelectField searchable label="Warehouse" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
               <option value="">All my warehouses</option>
               {warehouses.map((w) => (
                 <option key={w.id} value={w.id}>

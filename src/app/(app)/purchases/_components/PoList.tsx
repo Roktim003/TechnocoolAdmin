@@ -153,7 +153,7 @@ export function PoList({ caps, warehouses, mode, onCount, supplierId: fixedSuppl
         </SelectField>
       ) : null}
       {fixedSupplier ? null : (
-        <SelectField label="Supplier" value={supplierId} onChange={(e) => (setSupplierId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
+        <SelectField searchable label="Supplier" value={supplierId} onChange={(e) => (setSupplierId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
           <option value="">All suppliers</option>
           {suppliers.map((s) => (
             <option key={s.id} value={s.id}>
@@ -167,7 +167,7 @@ export function PoList({ caps, warehouses, mode, onCount, supplierId: fixedSuppl
         <option value="LOCAL">Local</option>
         <option value="IMPORTED">Imported</option>
       </SelectField>
-      <SelectField label="Deliver to" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
+      <SelectField searchable label="Deliver to" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
         <option value="">All my warehouses</option>
         {warehouses
           .filter((w) => caps.warehouseIds.includes(w.id))

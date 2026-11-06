@@ -8,7 +8,6 @@
 
 html {
   -webkit-text-size-adjust: 100%;
-  color-scheme: light;
 }
 
 body {
@@ -124,6 +123,10 @@ kbd {
 
 .visually-hidden {
   position: absolute !important;
+  /* Pinned to the corner: left at its natural spot (e.g. a caption at the far end of a wide,
+     horizontally scrolling table) it would stretch the page sideways on phones. */
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
   padding: 0;

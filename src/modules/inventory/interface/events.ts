@@ -173,7 +173,7 @@ async function digestRecipients(userIds: string[]): Promise<string[]> {
     prisma.user.findMany({ where: { id: { in: userIds }, status: "ACTIVE", email: { not: null } }, select: { id: true, email: true } }),
     prisma.notificationPreference.findMany({ where: { userId: { in: userIds }, type: "LOW_STOCK_DIGEST" }, select: { userId: true, email: true } }),
   ]);
-  const off = new Set(prefs.filter((p) => !p.email).map((p) => p.userId));
+  const off = new Set(prefs.filter((p) => p.email === false).map((p) => p.userId));
   return users.filter((u) => u.email && !off.has(u.id)).map((u) => u.email!);
 }
 

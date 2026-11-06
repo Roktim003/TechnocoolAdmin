@@ -6,16 +6,17 @@ import { inventory } from "@/modules/inventory/interface/container";
 import { stockAccess } from "./_lib/access";
 import { StockWorkspace, type StockTab } from "./_components/StockWorkspace";
 import styles from "./_components/stock.module.css";
-import { USER_ENTRY_TYPES, type EntryType } from "./_components/types";
+import { STATUS_LABEL, USER_ENTRY_TYPES, type EntryType } from "./_components/types";
 
 export const metadata: Metadata = { title: "Stock in / out" };
 
 const TABS: StockTab[] = ["new", "entries", "pending", "levels"];
 
-export default async function StockPage({ searchParams }: { searchParams: Promise<{ tab?: string; po?: string; type?: string; project?: string; warehouse?: string }> }) {
+export default async function StockPage({ searchParams }: { searchParams: Promise<{ tab?: string; po?: string; type?: string; project?: string; warehouse?: string; status?: string; mine?: string }> }) {
   const caps = await stockAccess();
   if (!caps) return <AccessDenied what="Stock in / out" />;
-  const { tab, po, type, project, warehouse } = await searchParams;
+  const { tab, po, type, project, warehouse, status, mine } = await searchParams;
+  const entryFilter = { status: status && status in STATUS_LABEL ? status : undefined, mine: mine === "1" || mine === "true" };
   const prefillType = (USER_ENTRY_TYPES as readonly string[]).includes(type ?? "") ? (type as EntryType) : undefined;
   const [warehouses, settings] = await Promise.all([inventory().masters.warehouses(), inventory().masters.settings()]);
   const initialTab = (po || prefillType) && caps.canCreate ? "new" : TABS.includes(tab as StockTab) ? (tab as StockTab) : caps.canCreate ? "new" : "entries";
@@ -33,7 +34,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
           ) : null
         }
       />
-      <StockWorkspace caps={caps} warehouses={warehouses} initialTab={initialTab} defaultVat={settings.defaultSalesVatPercent} requiredDocs={settings.importDocsRequiredToPost} initialPoId={po} prefill={prefillType ? { type: prefillType, projectId: project, warehouseId: warehouse } : undefined} />
+      <StockWorkspace caps={caps} warehouses={warehouses} initialTab={initialTab} defaultVat={settings.defaultSalesVatPercent} requiredDocs={settings.importDocsRequiredToPost} initialPoId={po} prefill={prefillType ? { type: prefillType, projectId: project, warehouseId: warehouse } : undefined} entryFilter={entryFilter} />
     </>
   );
 }

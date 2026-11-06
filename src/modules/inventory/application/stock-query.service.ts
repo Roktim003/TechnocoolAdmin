@@ -86,6 +86,7 @@ export class StockQueryService {
     const [s] = await this.store.serialsById([id]);
     if (!s) throw new NotFoundError("Serial number");
     const list = await this.store.listSerials({ page: 1, pageSize: 1, skip: 0, take: 1, sort: [{ field: "serial", direction: "asc" }], q: s.serial, filters: { productId: s.productId } });
-    return { serial: list.items.find((x) => x.id === id) ?? { ...s, productCode: "", productName: "", warehouseCode: null, projectCode: null, customerName: null }, history: await this.store.serialHistory(id) };
+    const [history, cameIn] = await Promise.all([this.store.serialHistory(id), this.store.serialArrival(id)]);
+    return { serial: list.items.find((x) => x.id === id) ?? { ...s, productCode: "", productName: "", warehouseCode: null, projectCode: null, customerName: null }, history, cameIn };
   }
 }

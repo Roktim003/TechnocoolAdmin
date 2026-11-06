@@ -2,6 +2,8 @@
 
 import { useEffect, useId, useState } from "react";
 import { Checkbox, SelectField, TextField } from "@/components/ui/Field";
+import fieldStyles from "@/components/ui/Field.module.css";
+import { ProductSelect } from "@/components/ui/ProductSelect";
 import { api } from "@/lib/api-client";
 import { DATE_TOKENS, isDateToken, isMonthToken, MONTH_TOKENS } from "@/modules/reporting/domain/schedule";
 import type { Lookups, ParamDef } from "./types";
@@ -36,7 +38,7 @@ function Param({ p, value, onChange, lookups }: { p: ParamDef; value: string; on
       return <MonthParam label={p.label} value={value} onChange={onChange} />;
     case "warehouse":
       return (
-        <SelectField label={p.label} value={value} onChange={(e) => onChange(e.target.value)}>
+        <SelectField searchable label={p.label} value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="">All my warehouses</option>
           {lookups?.warehouses.map((w) => (
             <option key={w.id} value={w.id}>
@@ -51,7 +53,7 @@ function Param({ p, value, onChange, lookups }: { p: ParamDef; value: string; on
     case "user": {
       const list = p.kind === "catalog" ? lookups?.catalogs : p.kind === "category" ? lookups?.categories : p.kind === "customer" ? lookups?.customers : lookups?.users;
       return (
-        <SelectField label={p.label} value={value} onChange={(e) => onChange(e.target.value)}>
+        <SelectField searchable label={p.label} value={value} onChange={(e) => onChange(e.target.value)}>
           {any}
           {list?.map((x) => (
             <option key={x.id} value={x.id}>
@@ -65,7 +67,7 @@ function Param({ p, value, onChange, lookups }: { p: ParamDef; value: string; on
     case "supplier": {
       const list = p.kind === "project" ? lookups?.projects : lookups?.suppliers;
       return (
-        <SelectField label={p.label} value={value} onChange={(e) => onChange(e.target.value)}>
+        <SelectField searchable label={p.label} value={value} onChange={(e) => onChange(e.target.value)}>
           {any}
           {list?.map((x) => (
             <option key={x.id} value={x.id}>
@@ -97,7 +99,7 @@ function Param({ p, value, onChange, lookups }: { p: ParamDef; value: string; on
     default:
       if (p.key === "entityType" && lookups?.recordTypes.length) {
         return (
-          <SelectField label={p.label} value={value} onChange={(e) => onChange(e.target.value)}>
+          <SelectField searchable label={p.label} value={value} onChange={(e) => onChange(e.target.value)}>
             {any}
             {lookups.recordTypes.map((t) => (
               <option key={t} value={t}>
@@ -169,40 +171,40 @@ function MonthParam({ label, value, onChange }: { label: string; value: string; 
   );
 }
 
+type LookupProduct = { id: string; code: string; name: string };
+
+/** Product filter: the app's product dropdown (search inside the list) plus a clear button. */
 function ProductParam({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  const listId = useId();
-  const [text, setText] = useState("");
-  const [options, setOptions] = useState<{ id: string; code: string; name: string }[]>([]);
+  const id = useId();
+  const [chosen, setChosen] = useState<LookupProduct | null>(null);
   useEffect(() => {
-    if (!value) setText("");
+    if (!value) setChosen(null);
   }, [value]);
-  useEffect(() => {
-    const t = setTimeout(() => {
-      api<{ data: typeof options }>("/reports/lookups/products", { query: { q: text } })
-        .then((r) => setOptions(r.data))
-        .catch(() => setOptions([]));
-    }, 250);
-    return () => clearTimeout(t);
-  }, [text]);
+  const text = chosen && chosen.id === value ? `${chosen.code} · ${chosen.name}` : value ? "Selected product" : "All products";
   return (
-    <>
-      <TextField
-        label={label}
-        list={listId}
-        value={text || (value ? (options.find((o) => o.id === value)?.code ?? "Selected product") : "")}
-        placeholder="Code or name"
-        onChange={(e) => {
-          const v = e.target.value;
-          setText(v);
-          const hit = options.find((o) => `${o.code} · ${o.name}` === v);
-          onChange(hit ? hit.id : "");
-        }}
-      />
-      <datalist id={listId}>
-        {options.map((o) => (
-          <option key={o.id} value={`${o.code} · ${o.name}`} />
-        ))}
-      </datalist>
-    </>
+    <div className={fieldStyles.field}>
+      <label htmlFor={id} className={fieldStyles.label}>
+        {label}
+      </label>
+      <div className={styles.productFilter}>
+        <ProductSelect<LookupProduct>
+          id={id}
+          label={label}
+          text={text}
+          placeholder={!value}
+          className={fieldStyles.input}
+          search={(q) => api<{ data: LookupProduct[] }>("/reports/lookups/products", { query: { q } }).then((r) => r.data)}
+          onSelect={(p) => {
+            setChosen(p);
+            onChange(p.id);
+          }}
+        />
+        {value ? (
+          <button type="button" className={styles.productClear} onClick={() => onChange("")} aria-label={`Clear ${label.toLowerCase()}`}>
+            ✕
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }

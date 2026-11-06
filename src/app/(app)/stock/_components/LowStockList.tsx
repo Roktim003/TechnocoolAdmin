@@ -187,7 +187,7 @@ export function LowStockList({ caps, warehouses }: { caps: StockCaps; warehouses
         toolbar={
           <div className={styles.toolbar}>
             <TextField label="Search" placeholder="Code, name, model…" value={q} onChange={(e) => setQ(e.target.value)} fieldClassName={styles.search} />
-            <SelectField label="Brand" value={catalogId} onChange={(e) => (setCatalogId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
+            <SelectField searchable label="Brand" value={catalogId} onChange={(e) => (setCatalogId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
               <option value="">All brands</option>
               {catalogs.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -195,7 +195,7 @@ export function LowStockList({ caps, warehouses }: { caps: StockCaps; warehouses
                 </option>
               ))}
             </SelectField>
-            <SelectField label="Category" value={categoryId} onChange={(e) => (setCategoryId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
+            <SelectField searchable label="Category" value={categoryId} onChange={(e) => (setCategoryId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
               <option value="">All categories</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -203,7 +203,7 @@ export function LowStockList({ caps, warehouses }: { caps: StockCaps; warehouses
                 </option>
               ))}
             </SelectField>
-            <SelectField label="Warehouse" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter} helper={warehouseId ? undefined : "Totals: all warehouses"}>
+            <SelectField searchable label="Warehouse" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter} helper={warehouseId ? undefined : "Totals: all warehouses"}>
               <option value="">All warehouses</option>
               {mine.map((w) => (
                 <option key={w.id} value={w.id}>

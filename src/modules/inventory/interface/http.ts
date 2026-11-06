@@ -301,7 +301,7 @@ export const serialHandlers = {
   }),
   get: authedRoute<IdParams>(VIEW, async (ctx) => {
     const r = await inventory().stock.serial(id(ctx, "Serial number"));
-    return { data: { ...r.serial, history: r.history.map((h) => ({ ...h, at: h.at.toISOString() })) } };
+    return { data: { ...r.serial, cameIn: r.cameIn, history: r.history.map((h) => ({ ...h, at: h.at.toISOString() })) } };
   }),
 };
 

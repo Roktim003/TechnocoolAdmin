@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Checkbox, FieldGroup, TextField, Toggle } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Notification } from "@/components/ui/Notification";
 import { api, ApiError, errorMessage } from "@/lib/api-client";
+import { collect, revealProblems, rules } from "@/lib/validation";
 import { DOC_LABEL, DOC_TYPES, type ImportDocType } from "./import-docs";
 import styles from "./stock.module.css";
 
@@ -20,26 +22,43 @@ export function InventorySettingsForm({ initial }: { initial: SettingsDto }) {
   const [s, setS] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
-  const [vatError, setVatError] = useState<string | undefined>();
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
+  const [attempt, setAttempt] = useState(false);
+
+  // Same rule as the server's PercentSchema: 0–100 with at most 2 decimals.
+  const problems = collect(["defaultSalesVatPercent", rules.required(s.defaultSalesVatPercent, "the default VAT %") ?? rules.percent(s.defaultSalesVatPercent)]);
+  const errors = { ...serverErrors, ...(attempt ? problems : {}) };
+
+  // A server error disappears once the settings are edited.
+  useEffect(() => setServerErrors({}), [s]);
 
   async function save() {
+    setAttempt(true);
+    setNotice(null);
+    if (Object.keys(problems).length) {
+      revealProblems();
+      return;
+    }
     setSaving(true);
-    setVatError(undefined);
+    setServerErrors({});
     try {
       const r = await api<{ data: SettingsDto }>("/inventory-settings", {
         method: "PATCH",
         body: {
-          defaultSalesVatPercent: s.defaultSalesVatPercent,
+          defaultSalesVatPercent: s.defaultSalesVatPercent.trim(),
           adminWriteOffNeedsApproval: s.adminWriteOffNeedsApproval,
           allowAdminBelowCostSale: s.allowAdminBelowCostSale,
           importDocsRequiredToPost: s.importDocsRequiredToPost,
         },
       });
       setS(r.data);
+      setAttempt(false);
       setNotice({ kind: "success", message: "Settings saved." });
     } catch (err) {
-      if (err instanceof ApiError) setVatError(err.fieldErrors().defaultSalesVatPercent);
-      setNotice({ kind: "error", message: errorMessage(err) });
+      const fields = err instanceof ApiError ? err.fieldErrors() : {};
+      setServerErrors(fields);
+      setNotice({ kind: "error", message: Object.keys(fields).length ? "Some settings need fixing. The fields are marked in red below." : errorMessage(err) });
+      revealProblems();
     } finally {
       setSaving(false);
     }
@@ -52,12 +71,13 @@ export function InventorySettingsForm({ initial }: { initial: SettingsDto }) {
           {notice.message}
         </Notification>
       ) : null}
+      {attempt ? <FormProblems problems={problems} labels={{ defaultSalesVatPercent: "Default VAT %" }} /> : null}
       <section className={styles.section}>
         <h2 className={styles.sectionTitle} style={{ marginBottom: "var(--space-5)" }}>
           Sales
         </h2>
         <div className={styles.stack}>
-          <TextField label="Default VAT %" inputMode="decimal" value={s.defaultSalesVatPercent} onChange={(e) => setS({ ...s, defaultSalesVatPercent: e.target.value })} error={vatError} helper="Pre-filled on new sales; can be changed per sale." />
+          <TextField label="Default VAT %" kind="percent" value={s.defaultSalesVatPercent} onChange={(e) => setS({ ...s, defaultSalesVatPercent: e.target.value })} error={errors.defaultSalesVatPercent} helper="0–100. Pre-filled on new sales; can be changed per sale." />
           <Toggle
             label="Admin may sell below average cost"
             description="When on, an Admin can confirm a sale priced below average cost (it is audit-logged). When off, nobody can."

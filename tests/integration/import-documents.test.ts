@@ -12,6 +12,8 @@ import * as downloadRoute from "@/app/api/v1/stock-entries/[id]/attachments/[att
 import * as postRoute from "@/app/api/v1/stock-entries/[id]/post/route";
 import * as submitRoute from "@/app/api/v1/stock-entries/[id]/submit/route";
 import * as settingsRoute from "@/app/api/v1/inventory-settings/route";
+import * as serialsRoute from "@/app/api/v1/serials/route";
+import * as serialRoute from "@/app/api/v1/serials/[id]/route";
 import { storage } from "@/shared/storage/storage";
 import { call } from "../helpers/http";
 import { resetDatabase } from "../helpers/db";
@@ -507,6 +509,25 @@ describe("warnings, search and origin", () => {
     // Other types don't carry an origin.
     const local = await createEntry(token, { type: "GRN_LOCAL", warehouseId: B, supplierId: await supplier(), lines: [{ productId: withOrigin.id, qty: 1, unitPrice: "1" }] });
     expect(local.body.data.lines[0]).not.toHaveProperty("countryOfOrigin");
+  });
+
+  it("a serial's detail says which GRN it came in on, with the B/E no. and country of origin", async () => {
+    await setRequired([]);
+    const p = await product(token, { trackSerial: true });
+    const store = await userToken(token, "Store Manager", ["A"]);
+    const g = (await createEntry(token, { action: "post", ...(await importBody({ product: p, lines: [{ productId: p.id, qty: 2, unitPrice: "200", serials: ["IMP-1", "IMP-2"] }], importShipment: FULL_DOCS })) } as never)).body.data;
+    const found = (await call(serialsRoute.GET, "GET", "/serials", { token: store.token, query: { q: "IMP-1" } })).body.data[0];
+    const detail = (await call(serialRoute.GET, "GET", `/serials/${found.id}`, { token: store.token, params: { id: found.id } })).body.data;
+    expect(detail.cameIn).toEqual({
+      entry: { id: g.id, number: g.number, type: "GRN_IMPORT" },
+      entryDate: g.entryDate,
+      warehouseCode: "A",
+      supplierName: "Daikin Airconditioning (Thailand)",
+      countryOfOrigin: "Thailand",
+      blNo: "MAEU-123456789",
+      boeNo: "C-112233",
+      boeDate: "2026-10-12",
+    });
   });
 });
 

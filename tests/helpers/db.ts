@@ -19,6 +19,7 @@ const TABLES = [
   "Notification",
   "NotificationPreference",
   "NotificationType",
+  "PushDevice",
   "EmailLog",
   "StockMovement",
   "SerialMovement",

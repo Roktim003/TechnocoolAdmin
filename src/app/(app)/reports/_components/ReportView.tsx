@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Chart } from "@/components/charts/Chart";
 import { Button } from "@/components/ui/Button";
 import { Notification } from "@/components/ui/Notification";
 import { Pagination } from "@/components/ui/Pagination";
+import { PdfViewer, type PdfRequest } from "@/components/ui/PdfViewer";
 import { SkeletonTableRows } from "@/components/ui/Skeleton";
 import { Tag } from "@/components/ui/Tag";
 import { api, errorMessage } from "@/lib/api-client";
@@ -16,9 +17,7 @@ import { FilterFields } from "./FilterFields";
 import { cleanFilters, withDefaults, type ColumnDef, type Lookups, type ReportInfo, type RunResult } from "./types";
 import styles from "./reports.module.css";
 
-interface ExportState {
-  jobId: string;
-  format: "xlsx" | "pdf";
+interface ExportStatus {
   status: "queued" | "processing" | "completed" | "failed";
   downloadUrl?: string | null;
   fileName?: string | null;
@@ -52,13 +51,12 @@ export function ReportView({
   const [result, setResult] = useState<RunResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [exports, setExports] = useState<ExportState[]>([]);
+  const [viewer, setViewer] = useState<PdfRequest | null>(null);
+  const closeViewer = useCallback(() => setViewer(null), []);
   const [busyRow, setBusyRow] = useState<string | null>(null);
   const appliedKey = JSON.stringify(applied);
-  const timers = useRef<number[]>([]);
 
   useEffect(() => setDraft(JSON.parse(appliedKey) as Record<string, string>), [appliedKey]);
-  useEffect(() => () => timers.current.forEach((t) => clearTimeout(t)), []);
 
   useEffect(() => {
     let alive = true;
@@ -87,28 +85,26 @@ export function ReportView({
     onChange({ filters: cleanFilters(report.params, applied), page: 1, pageSize, sort: next });
   }
 
-  async function startExport(format: "xlsx" | "pdf") {
-    try {
-      const r = await api<{ data: { jobId: string } }>(`/reports/${report.id}/exports`, { method: "POST", body: { format, params: cleanFilters(report.params, applied), ...(sort ? { sort } : {}) }, headers: { "Idempotency-Key": newKey() } });
-      const job: ExportState = { jobId: r.data.jobId, format, status: "queued" };
-      setExports((x) => [job, ...x].slice(0, 3));
-      poll(job.jobId, 0);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
-
-  function poll(jobId: string, attempt: number) {
-    const t = window.setTimeout(async () => {
-      try {
-        const s = (await api<{ data: ExportState }>(`/exports/${jobId}`)).data;
-        setExports((x) => x.map((e) => (e.jobId === jobId ? { ...e, ...s } : e)));
-        if (s.status !== "completed" && s.status !== "failed" && attempt < 300) poll(jobId, attempt + 1);
-      } catch (err) {
-        setExports((x) => x.map((e) => (e.jobId === jobId ? { ...e, status: "failed", failedReason: errorMessage(err) } : e)));
-      }
-    }, Math.min(1000 + attempt * 200, 3000));
-    timers.current.push(t);
+  /** Exports run in the worker; the viewer opens at once and shows the file when it's ready. */
+  function startExport(format: "xlsx" | "pdf") {
+    const params = cleanFilters(report.params, applied);
+    const sortBy = sort;
+    setViewer({
+      title: report.title,
+      subtitle: format === "xlsx" ? "Excel" : "PDF",
+      format,
+      load: async (signal) => {
+        const r = await api<{ data: { jobId: string } }>(`/reports/${report.id}/exports`, { method: "POST", body: { format, params, ...(sortBy ? { sort: sortBy } : {}) }, headers: { "Idempotency-Key": newKey() } });
+        for (let i = 0; i < 300; i++) {
+          await new Promise((done) => setTimeout(done, Math.min(800 + i * 200, 3000)));
+          if (signal.aborted) throw new DOMException("Closed", "AbortError");
+          const st = (await api<{ data: ExportStatus }>(`/exports/${r.data.jobId}`)).data;
+          if (st.status === "completed" && st.downloadUrl) return { url: st.downloadUrl, fileName: st.fileName || `${report.id}.${format}` };
+          if (st.status === "failed") throw new Error(st.failedReason || "The export failed.");
+        }
+        throw new Error("The export is taking too long. Narrow the filters and try again.");
+      },
+    });
   }
 
   async function createPo(productId: string) {
@@ -151,10 +147,10 @@ export function ReportView({
           <p className={styles.printOnly}>{filterSummary.length ? filterSummary.join(" · ") : "No filters"}</p>
         </div>
         <div className={`${styles.actions} ${styles.noPrint}`}>
-          <Button kind="secondary" size="sm" onClick={() => void startExport("xlsx")}>
+          <Button kind="secondary" size="sm" onClick={() => startExport("xlsx")} disabled={!!viewer}>
             Excel
           </Button>
-          <Button kind="secondary" size="sm" onClick={() => void startExport("pdf")}>
+          <Button kind="secondary" size="sm" onClick={() => startExport("pdf")} disabled={!!viewer}>
             PDF
           </Button>
           <Button kind="secondary" size="sm" onClick={() => window.print()}>
@@ -166,25 +162,7 @@ export function ReportView({
         </div>
       </header>
 
-      {exports.map((e) => (
-        <div key={e.jobId} className={styles.noPrint}>
-          <Notification
-            kind={e.status === "completed" ? "success" : e.status === "failed" ? "error" : "info"}
-            title={e.status === "completed" ? `${e.format === "xlsx" ? "Excel" : "PDF"} ready` : e.status === "failed" ? "Export failed" : `Preparing ${e.format === "xlsx" ? "Excel" : "PDF"}…`}
-            onClose={() => setExports((x) => x.filter((y) => y.jobId !== e.jobId))}
-          >
-            {e.status === "completed" && e.downloadUrl ? (
-              <>
-                <a href={e.downloadUrl}>Download {e.fileName}</a> — the link works for 1 hour.
-              </>
-            ) : e.status === "failed" ? (
-              e.failedReason
-            ) : (
-              "The file is generated in the background; you can keep working."
-            )}
-          </Notification>
-        </div>
-      ))}
+      <PdfViewer request={viewer} onClose={closeViewer} />
 
       {report.params.length ? (
         <form

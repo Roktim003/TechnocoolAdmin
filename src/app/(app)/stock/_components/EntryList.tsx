@@ -23,16 +23,20 @@ interface Props {
   /** "pending": entries waiting for the caller's verification. */
   mode: "all" | "pending";
   onCount?: (n: number) => void;
+  /** Initial filters (e.g. from a dashboard tile link). */
+  initialStatus?: string;
+  initialMine?: boolean;
 }
 
 const party = (e: EntryDto) => e.supplier?.name ?? e.customer?.name ?? (e.project ? `${e.project.code} — ${e.project.name}` : e.toWarehouse ? `→ ${e.toWarehouse.name}` : "—");
 
-export function EntryList({ caps, warehouses, mode, onCount }: Props) {
+export function EntryList({ caps, warehouses, mode, onCount, initialStatus = "", initialMine = false }: Props) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [type, setType] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  const [mine, setMine] = useState(initialMine);
   const [warehouseId, setWarehouseId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -54,7 +58,7 @@ export function EntryList({ caps, warehouses, mode, onCount }: Props) {
     setLoading(true);
     try {
       const r = await api<Page<EntryDetailDto>>("/stock-entries", {
-        query: { page, pageSize, q: debouncedQ, type, status: mode === "pending" ? undefined : status, warehouseId, dateFrom, dateTo, ...(mode === "pending" ? { awaitingMyApproval: "true", sort: "createdAt" } : {}) },
+        query: { page, pageSize, q: debouncedQ, type, status: mode === "pending" ? undefined : status, createdById: mode === "all" && mine ? caps.userId : undefined, warehouseId, dateFrom, dateTo, ...(mode === "pending" ? { awaitingMyApproval: "true", sort: "createdAt" } : {}) },
       });
       setResult(r);
       if (mode === "pending") onCount?.(r.meta.total);
@@ -64,7 +68,7 @@ export function EntryList({ caps, warehouses, mode, onCount }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedQ, type, status, warehouseId, dateFrom, dateTo, mode, onCount]);
+  }, [page, pageSize, debouncedQ, type, status, mine, caps.userId, warehouseId, dateFrom, dateTo, mode, onCount]);
 
   useEffect(() => {
     void load();
@@ -149,7 +153,13 @@ export function EntryList({ caps, warehouses, mode, onCount }: Props) {
           ))}
         </SelectField>
       ) : null}
-      <SelectField label="Warehouse" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
+      {mode === "all" ? (
+        <SelectField searchable label="Created by" value={mine ? "me" : ""} onChange={(e) => (setMine(e.target.value === "me"), setPage(1))} fieldClassName={styles.filter}>
+          <option value="">Anyone</option>
+          <option value="me">Me</option>
+        </SelectField>
+      ) : null}
+      <SelectField searchable label="Warehouse" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
         <option value="">All my warehouses</option>
         {warehouses
           .filter((w) => caps.warehouseIds.includes(w.id))

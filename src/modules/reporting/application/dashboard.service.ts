@@ -79,6 +79,8 @@ export interface DashboardQueries {
   /** What this user can approve now: entries / counts in their warehouses created or submitted by others, POs (own only with FULL). */
   approvals(viewer: ReportViewer, limit: number): Promise<{ entries: number; counts: number; pos: number; items: ApprovalItem[] }>;
   myEntries(userId: string, limit: number): Promise<{ id: string; number: string; typeLabel: string; status: string; date: string }[]>;
+  /** The user's own entries in these warehouses that are still drafts or were rejected (waiting for them to fix). */
+  myEntryCounts(userId: string, scope: string[]): Promise<{ drafts: number; rejected: number }>;
 }
 
 const CACHE_TTL_SECONDS = 60;
@@ -251,6 +253,12 @@ export class DashboardService {
         empty: "Nothing is waiting for you.",
         link: null,
       });
+    }
+    // Creators who can't verify (Store Manager): their own work still to finish, next to the low-stock tile.
+    if (hasLevel(v.permissions.inventory, "CREATE") && !hasLevel(v.permissions.inventory, "APPROVE")) {
+      const c = await this.d.queries.myEntryCounts(v.userId, v.warehouseIds);
+      out.push({ id: "my-drafts", kind: "kpi", title: "My drafts", value: c.drafts, valueType: "number", tone: "default", caption: "Saved, not yet submitted", link: "/stock?tab=entries&status=DRAFT&mine=1" });
+      out.push({ id: "my-rejected", kind: "kpi", title: "My rejected entries", value: c.rejected, valueType: "number", tone: c.rejected ? "danger" : "default", caption: "Fix and resubmit, or cancel", link: "/stock?tab=entries&status=REJECTED&mine=1" });
     }
     if (hasLevel(v.permissions.inventory, "CREATE")) {
       const mine = await this.d.queries.myEntries(v.userId, 5);

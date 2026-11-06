@@ -57,7 +57,39 @@ const EnvSchema = z.object({
   /** First retry delay for failed emails (doubles each attempt). */
   EMAIL_RETRY_DELAY_MS: z.coerce.number().int().nonnegative().default(30_000),
   EMAIL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
+  // Push notifications (Firebase Cloud Messaging) for the mobile app. Without it, push is off.
+  FCM_SERVICE_ACCOUNT: z
+    .string()
+    .optional()
+    .transform((v, ctx) => {
+      if (!v?.trim()) return undefined;
+      const account = parseServiceAccount(v.trim());
+      if (!account) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "must be a Firebase service-account JSON (or its base64) with project_id, client_email and private_key" });
+      return account ?? undefined;
+    }),
 });
+
+export interface FcmServiceAccount {
+  projectId: string;
+  clientEmail: string;
+  privateKey: string;
+  tokenUri: string;
+}
+
+/** The service-account key file from the Firebase console, pasted as JSON or base64-encoded. */
+export function parseServiceAccount(raw: string): FcmServiceAccount | null {
+  try {
+    const json = JSON.parse(raw.startsWith("{") ? raw : Buffer.from(raw, "base64").toString("utf8")) as Record<string, unknown>;
+    const str = (k: string) => (typeof json[k] === "string" && json[k] ? (json[k] as string) : null);
+    const projectId = str("project_id");
+    const clientEmail = str("client_email");
+    const privateKey = str("private_key")?.replace(/\\n/g, "\n");
+    if (!projectId || !clientEmail || !privateKey?.includes("PRIVATE KEY")) return null;
+    return { projectId, clientEmail, privateKey, tokenUri: str("token_uri") ?? "https://oauth2.googleapis.com/token" };
+  } catch {
+    return null;
+  }
+}
 
 export type Env = z.infer<typeof EnvSchema>;
 

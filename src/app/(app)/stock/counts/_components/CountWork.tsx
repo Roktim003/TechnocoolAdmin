@@ -8,11 +8,15 @@ import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, errorMessage } from "@/lib/api-client";
+import { sanitize } from "@/lib/validation";
+import { PdfViewer, type PdfRequest } from "@/components/ui/PdfViewer";
+import { waitForDocument } from "@/lib/documents";
 import { formatDateTime, formatMoney } from "@/shared/time/format";
 import { formatQty, newKey, type StockCaps } from "../../_components/types";
 import { COUNT_STATUS_LABEL, COUNT_STATUS_TAG, SCOPE_LABEL, type CountDto, type CountLineDto, type VarianceDto } from "./count-types";
 import styles from "./count.module.css";
 import base from "../../_components/stock.module.css";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 
 type Filter = "all" | "todo" | "recount" | "done";
 const norm = (s: string) => s.trim().toUpperCase();
@@ -21,6 +25,8 @@ const trimQty = (v: string | null) => (v === null ? "" : v.includes(".") ? v.rep
 export function CountWork({ caps, initial }: { caps: StockCaps; initial: CountDto }) {
   const [c, setC] = useState(initial);
   const [notice, setNotice] = useState<{ kind: "success" | "error" | "warning" | "info"; message: string } | null>(null);
+  const [pdfReq, setPdfReq] = useState<PdfRequest | null>(null);
+  const closePdf = useCallback(() => setPdfReq(null), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [scan, setScan] = useState("");
@@ -61,22 +67,16 @@ export function CountWork({ caps, initial }: { caps: StockCaps; initial: CountDt
     }
   }
 
-  async function sheet() {
-    setBusy("sheet");
-    try {
-      const job = (await api<{ data: { jobId: string } }>(`/stock-counts/${c.id}/sheet`)).data;
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 800));
-        const s = (await api<{ data: { status: string; downloadUrl: string | null; failedReason: string | null } }>(`/documents/${job.jobId}`)).data;
-        if (s.status === "completed" && s.downloadUrl) return void window.open(s.downloadUrl, "_blank", "noopener");
-        if (s.status === "failed") throw new Error(s.failedReason ?? "The PDF couldn't be created.");
-      }
-      throw new Error("The PDF is taking too long. Try again in a minute.");
-    } catch (err) {
-      setNotice({ kind: "error", message: errorMessage(err) });
-    } finally {
-      setBusy(null);
-    }
+  /** Opens the PDF viewer; it shows a loader while the worker renders the document. */
+  function sheet() {
+    setPdfReq({
+      title: "Count sheet",
+      subtitle: c.number,
+      load: async (signal) => {
+        const job = (await api<{ data: { jobId: string } }>(`/stock-counts/${c.id}/sheet`)).data;
+        return waitForDocument(job.jobId, `${c.number}.pdf`, signal);
+      },
+    });
   }
 
   const saveLine = useCallback(
@@ -147,12 +147,13 @@ export function CountWork({ caps, initial }: { caps: StockCaps; initial: CountDt
             </Button>
           ) : null}
           {c.actions.printSheet ? (
-            <Button kind="secondary" onClick={sheet} disabled={!!busy}>
-              {busy === "sheet" ? "Preparing…" : "Print count sheet"}
+            <Button kind="secondary" onClick={sheet} disabled={!!busy || !!pdfReq}>
+              Print count sheet
             </Button>
           ) : null}
+          <PdfViewer request={pdfReq} onClose={closePdf} />
           {c.actions.cancel ? (
-            <Button kind="ghost" onClick={() => window.confirm("Cancel this count? Nothing in stock changes and the products are released.") && act("cancel", undefined, "Count cancelled.")} disabled={!!busy}>
+            <Button kind="danger" onClick={async () => (await confirmDialog({ title: `Cancel count ${c.number}?`, message: "Nothing in stock changes, the counts entered so far are discarded and the products are released for stock in / out again.", confirmText: "Cancel count", cancelText: "Keep counting", danger: true })) && act("cancel", undefined, "Count cancelled.")} disabled={!!busy}>
               Cancel count
             </Button>
           ) : null}
@@ -324,6 +325,8 @@ function LineCard({
   }, [line.id]);
 
   async function save(body?: Record<string, unknown>) {
+    if (stepTimer.current) clearTimeout(stepTimer.current);
+    stepTimer.current = null;
     setState("saving");
     try {
       await onSave(line, body ?? (line.product.trackSerial ? { serials } : { countedQty: qty === "" ? null : qty }));
@@ -334,10 +337,15 @@ function LineCard({
     }
   }
 
+  // − / + save on their own shortly after the last tap (several quick taps make one save).
+  const stepTimer = useRef<number | null>(null);
+  useEffect(() => () => void (stepTimer.current && clearTimeout(stepTimer.current)), []);
   const step = (delta: number) => {
     const n = Math.max(0, Math.round(((Number(qty) || 0) + delta) * 1000) / 1000);
     setQty(String(n));
     setState("dirty");
+    if (stepTimer.current) clearTimeout(stepTimer.current);
+    stepTimer.current = window.setTimeout(() => void save({ countedQty: String(n) }), 600);
   };
 
   const cls = `${styles.line} ${line.recountRequested ? styles.lineRecount : done ? styles.lineCounted : ""} ${active ? styles.lineActive : ""}`;
@@ -369,6 +377,7 @@ function LineCard({
                 style={{ fontSize: 16, textAlign: "left" }}
                 placeholder="Scan or type a serial…"
                 aria-label={`Serial number for ${line.product.code}`}
+                maxLength={100}
                 value={serialText}
                 autoCapitalize="characters"
                 onChange={(e) => setSerialText(e.target.value)}
@@ -420,7 +429,12 @@ function LineCard({
             aria-label={`Counted quantity of ${line.product.code}`}
             value={qty}
             placeholder="—"
-            onChange={(e) => (setQty(e.target.value), setState("dirty"))}
+            onChange={(e) => {
+              if (stepTimer.current) clearTimeout(stepTimer.current);
+              // Digits and one "." with up to 3 decimals only (server QuantitySchema).
+              setQty(sanitize("qty", e.target.value));
+              setState("dirty");
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -584,7 +598,7 @@ function Review({
             <Button kind="secondary" onClick={onRecount} disabled={!!busy || !recountIds.length}>
               {busy === "request-recount" ? "Sending…" : "Request recount"}
             </Button>
-            <Button onClick={() => window.confirm("Approve and post the differences as a stock adjustment?") && onApprove()} disabled={!!busy || recountIds.length > 0}>
+            <Button onClick={async () => (await confirmDialog({ title: "Approve this count?", message: "The differences are posted as one stock adjustment, stock levels change to the counted quantities and the products are released.", confirmText: "Approve & post" })) && onApprove()} disabled={!!busy || recountIds.length > 0}>
               {busy === "approve" ? "Posting…" : "Approve & post adjustment"}
             </Button>
           </span>

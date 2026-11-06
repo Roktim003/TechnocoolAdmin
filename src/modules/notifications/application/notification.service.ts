@@ -2,7 +2,7 @@ import { NotFoundError, ValidationError } from "@/shared/errors/app-error";
 import type { ListQuery } from "@/shared/pagination/list-query";
 import { NOTIFICATION_TYPES, notificationType } from "../domain/types";
 import { renderEmail, type EmailContent } from "./email-template";
-import type { EmailFile, EmailJob, EmailQueue, Mailer, NotificationFilters, NotificationStore } from "./ports";
+import type { EmailFile, EmailJob, EmailQueue, Mailer, NotificationFilters, NotificationStore, PreferenceChange, PushDeviceStore, PushJob, PushQueue } from "./ports";
 
 export interface PublishInput {
   type: string;
@@ -16,32 +16,50 @@ export interface PublishInput {
 }
 
 export class NotificationService {
-  constructor(private readonly d: { store: NotificationStore; queue: EmailQueue; appUrl: () => string }) {}
+  constructor(private readonly d: { store: NotificationStore; queue: EmailQueue; appUrl: () => string; devices?: PushDeviceStore; push?: PushQueue }) {}
 
   /**
-   * Creates in-app notifications (unless the type is email-only) and queues an email for each
-   * recipient whose preference allows it. Never throws for one bad recipient.
+   * Creates in-app notifications (unless the type is email-only), queues an email for each
+   * recipient whose preference allows it, and a push for each of their phones (push on by default).
+   * Never throws for one bad recipient.
    */
-  async publish(input: PublishInput): Promise<{ notified: number; emailed: number }> {
+  async publish(input: PublishInput): Promise<{ notified: number; emailed: number; pushed: number }> {
     const def = notificationType(input.type);
     if (!def) throw new Error(`Unknown notification type ${input.type}`);
     const ids = [...new Set(input.userIds.filter((x): x is string => !!x))];
-    if (!ids.length) return { notified: 0, emailed: 0 };
+    if (!ids.length) return { notified: 0, emailed: 0, pushed: 0 };
 
     const recipients = await this.d.store.recipients(ids);
-    if (!recipients.length) return { notified: 0, emailed: 0 };
-    if (def.inApp) await this.d.store.create(recipients.map((r) => ({ userId: r.id, type: def.key, title: input.title, body: input.body, link: input.link ?? null })));
+    if (!recipients.length) return { notified: 0, emailed: 0, pushed: 0 };
+    const created = def.inApp ? await this.d.store.create(recipients.map((r) => ({ userId: r.id, type: def.key, title: input.title, body: input.body, link: input.link ?? null }))) : [];
 
-    const chosen = new Map((await this.d.store.preferences(recipients.map((r) => r.id), def.key)).map((p) => [p.userId, p.email]));
+    const chosen = new Map((await this.d.store.preferences(recipients.map((r) => r.id), def.key)).map((p) => [p.userId, p]));
     const link = input.link ? `${this.d.appUrl().replace(/\/$/, "")}${input.link}` : null;
     const { html, text } = renderEmail({ title: input.title, paragraphs: [input.body], link, ...input.email });
     let emailed = 0;
     for (const r of recipients) {
-      if (!r.email || !(chosen.get(r.id) ?? def.defaultEmail)) continue;
+      if (!r.email || !(chosen.get(r.id)?.email ?? def.defaultEmail)) continue;
       await this.queueEmail({ to: r.email, subject: input.email?.subject ?? input.title, html, text }, def.key);
       emailed++;
     }
-    return { notified: def.inApp ? recipients.length : 0, emailed };
+
+    let pushed = 0;
+    const { devices, push } = this.d;
+    if (created.length && devices && push?.enabled()) {
+      const notificationOf = new Map(created.filter((n) => chosen.get(n.userId)?.push ?? true).map((n) => [n.userId, n.id]));
+      const jobs: PushJob[] = (await devices.deviceIdsOf([...notificationOf.keys()])).map((dv) => ({
+        deviceId: dv.id,
+        userId: dv.userId,
+        notificationId: notificationOf.get(dv.userId)!,
+        type: def.key,
+        title: input.title,
+        body: input.body,
+        link: input.link ?? null,
+      }));
+      if (jobs.length) await push.enqueue(jobs);
+      pushed = jobs.length;
+    }
+    return { notified: created.length, emailed, pushed };
   }
 
   /** Writes the EmailLog row (QUEUED) and puts the email on the queue. */
@@ -71,13 +89,19 @@ export class NotificationService {
   /* ── preferences ── */
 
   async preferences(userId: string) {
-    const chosen = new Map((await this.d.store.preferences([userId])).map((p) => [p.type, p.email]));
-    return NOTIFICATION_TYPES.map((t) => ({ type: t.key, label: t.label, description: t.description, inApp: t.inApp, email: chosen.get(t.key) ?? t.defaultEmail }));
+    const chosen = new Map((await this.d.store.preferences([userId])).map((p) => [p.type, p]));
+    return NOTIFICATION_TYPES.map((t) => {
+      const c = chosen.get(t.key);
+      // Push goes with the in-app notification, so email-only types (digests) never push.
+      return { type: t.key, label: t.label, description: t.description, inApp: t.inApp, email: c?.email ?? t.defaultEmail, push: t.inApp ? (c?.push ?? true) : false };
+    });
   }
 
-  async updatePreferences(userId: string, prefs: { type: string; email: boolean }[]) {
+  async updatePreferences(userId: string, prefs: PreferenceChange[]) {
     const unknown = prefs.filter((p) => !notificationType(p.type));
     if (unknown.length) throw new ValidationError("Unknown notification type.", unknown.map((p) => ({ path: "preferences", message: `Unknown type ${p.type}.` })));
+    const emailOnly = prefs.filter((p) => p.push !== undefined && !notificationType(p.type)!.inApp);
+    if (emailOnly.length) throw new ValidationError("Email-only notifications have no push.", emailOnly.map((p) => ({ path: "preferences", message: `${p.type} is sent by email only.` })));
     await this.d.store.setPreferences(userId, prefs);
     return this.preferences(userId);
   }

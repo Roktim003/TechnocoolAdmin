@@ -5,13 +5,16 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { TextAreaField } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, download, errorMessage, upload } from "@/lib/api-client";
+import { rules } from "@/lib/validation";
 import { formatDateTime, formatMoney } from "@/shared/time/format";
 import { formatQty, newKey, type StockCaps } from "./types";
 import styles from "./stock.module.css";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface Issue {
   row: number;
@@ -54,6 +57,7 @@ export function OpeningWizard({ caps, initialLocks }: { caps: StockCaps; initial
   const [unlocking, setUnlocking] = useState<WarehouseLock | null>(null);
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState<string | undefined>();
+  const [reasonAttempt, setReasonAttempt] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const commitKey = useRef(newKey());
 
@@ -107,7 +111,7 @@ export function OpeningWizard({ caps, initialLocks }: { caps: StockCaps; initial
   }
 
   async function lock(w: WarehouseLock) {
-    if (!window.confirm(`Lock opening stock for ${w.name}? After this, no opening entries or imports are accepted for it.`)) return;
+    if (!(await confirmDialog({ title: `Lock opening stock for ${w.name}?`, message: "After this, no opening entries or imports are accepted for this warehouse. Only an Admin can unlock it, with a reason.", confirmText: "Lock opening stock" }))) return;
     try {
       const r = (await api<{ data: WarehouseLock }>(`/warehouses/${w.id}/lock-opening`, { method: "POST", headers: { "Idempotency-Key": newKey() } })).data;
       setLocks((ls) => ls.map((x) => (x.id === r.id ? r : x)));
@@ -116,11 +120,17 @@ export function OpeningWizard({ caps, initialLocks }: { caps: StockCaps; initial
     }
   }
 
+  // Unlock reason: 3–500 characters (server ReasonSchema).
+  const reasonProblem = rules.required(reason, "a reason") ?? (reason.trim().length < 3 ? "Use at least 3 characters." : rules.maxLength(reason, 500));
+  const shownReasonError = (reasonAttempt ? reasonProblem : undefined) ?? reasonError;
+
   async function unlock() {
     if (!unlocking) return;
+    setReasonAttempt(true);
+    if (reasonProblem) return;
     setBusy("unlock");
     try {
-      const r = (await api<{ data: WarehouseLock }>(`/warehouses/${unlocking.id}/unlock-opening`, { method: "POST", body: { reason }, headers: { "Idempotency-Key": newKey() } })).data;
+      const r = (await api<{ data: WarehouseLock }>(`/warehouses/${unlocking.id}/unlock-opening`, { method: "POST", body: { reason: reason.trim() }, headers: { "Idempotency-Key": newKey() } })).data;
       setLocks((ls) => ls.map((x) => (x.id === r.id ? r : x)));
       setUnlocking(null);
       setReason("");
@@ -262,7 +272,7 @@ export function OpeningWizard({ caps, initialLocks }: { caps: StockCaps; initial
               {caps.isAdmin ? (
                 <div style={{ marginTop: "var(--space-3)" }}>
                   {w.openingLocked ? (
-                    <Button kind="ghost" size="sm" onClick={() => (setUnlocking(w), setReasonError(undefined))}>
+                    <Button kind="ghost" size="sm" onClick={() => (setUnlocking(w), setReasonError(undefined), setReasonAttempt(false))}>
                       Unlock…
                     </Button>
                   ) : (
@@ -289,7 +299,8 @@ export function OpeningWizard({ caps, initialLocks }: { caps: StockCaps; initial
           void unlock();
         }}
       >
-        <TextAreaField label="Reason (recorded in the audit log)" rows={3} value={reason} onChange={(e) => (setReason(e.target.value), setReasonError(undefined))} error={reasonError} required />
+        {reasonAttempt && reasonProblem ? <FormProblems problems={{ reason: reasonProblem }} labels={{ reason: "Reason" }} title="1 thing to fix before unlocking" /> : null}
+        <TextAreaField label="Reason (recorded in the audit log)" rows={3} value={reason} onChange={(e) => (setReason(e.target.value), setReasonError(undefined))} error={shownReasonError} helper="3–500 characters." required />
       </Modal>
     </div>
   );

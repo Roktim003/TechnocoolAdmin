@@ -55,6 +55,7 @@ SMTP_SECURE=false
 SMTP_USER=<smtp user>
 SMTP_PASSWORD=<smtp password / app password>
 SMTP_FROM=StockBook <no-reply@your-domain.com>
+FCM_SERVICE_ACCOUNT=<Firebase service-account key JSON, or its base64; empty = no push to the mobile app>
 ```
 
 `SEED_SAMPLE_DATA=false` starts production with empty suppliers, customers and projects (the sample ones are for demos).
@@ -76,6 +77,8 @@ Create a second application from the **same repository and Dockerfile** (Coolify
 - **Environment:** the same variables as the app, including the `S3_*` ones (the worker reads import files from storage and stores generated PDFs there), but `RUN_MIGRATIONS=false` and `SERVICE_NAME=stockbook-worker`.
 
 The worker also sends email (queue `email`, retried with exponential backoff), validates opening-stock imports, checks low-stock crossings after postings and sends the daily low-stock digest (a repeatable job it schedules on start, 09:00 Asia/Dhaka by default). Give it the same `SMTP_*` variables as the app. Leave `SMTP_HOST` empty to run without email (in-app notifications still work).
+
+It also sends the mobile app's push notifications (queue `push`, through Firebase Cloud Messaging). Set the same `FCM_SERVICE_ACCOUNT` on the app and the worker: the app uses it to decide whether to queue pushes, the worker to send them. Base64 avoids pasting a multi-line key into Coolify: `base64 -w0 service-account.json`.
 
 The image includes Chromium and fonts (`PDF_BROWSER_PATH` is preset), which the worker uses to render stock documents (GRN, challan, invoice) to PDF; nothing else to install.
 

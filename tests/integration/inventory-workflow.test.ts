@@ -225,6 +225,8 @@ describe("serial numbers", () => {
     const s1 = list.body.data[0];
     const detail = await call(serialRoute.GET, "GET", `/serials/${s1.id}`, { token, params: { id: s1.id } });
     expect(detail.body.data.history.map((h: any) => h.entryNumber ?? h.entry?.number)).toEqual([`GRN-L-${FY}-0001`, iss.number]);
+    expect(detail.body.data.cameIn).toMatchObject({ entry: { number: `GRN-L-${FY}-0001`, type: "GRN_LOCAL" }, warehouseCode: "A", boeNo: null, blNo: null });
+    expect(detail.body.data.cameIn.supplierName).toEqual(expect.any(String));
 
     // Reversal puts the serial back in stock.
     await reverse(iss.id, token);

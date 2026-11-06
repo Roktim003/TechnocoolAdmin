@@ -84,7 +84,7 @@
 
 /* ── Popover menu (portalled to <body>, fixed position) ── */
 .menu {
-  position: fixed;
+  position: absolute; /* page coordinates, set inline; portalled to <body> */
   z-index: 300;
   display: flex;
   flex-direction: column;

@@ -1,12 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import type { Db } from "@/shared/db/prisma";
 import { hasLevel, type ModuleKey, type PermissionLevel } from "@/shared/rbac/levels";
-import type { NotificationStore, RecipientDirectory } from "../application/ports";
+import type { NotificationStore, PushDeviceStore, RecipientDirectory } from "../application/ports";
 
 export function prismaNotificationStore(db: Db): NotificationStore {
   return {
     async create(rows) {
-      if (rows.length) await db.notification.createMany({ data: rows });
+      if (!rows.length) return [];
+      return db.notification.createManyAndReturn({ data: rows, select: { id: true, userId: true } });
     },
     async list(userId, q) {
       const where: Prisma.NotificationWhereInput = { userId, ...(q.filters.unread ? { readAt: null } : {}), ...(q.filters.type ? { type: q.filters.type } : {}) };
@@ -24,11 +25,12 @@ export function prismaNotificationStore(db: Db): NotificationStore {
     },
     async preferences(userIds, type) {
       if (!userIds.length) return [];
-      return db.notificationPreference.findMany({ where: { userId: { in: userIds }, ...(type ? { type } : {}) }, select: { userId: true, type: true, email: true } });
+      return db.notificationPreference.findMany({ where: { userId: { in: userIds }, ...(type ? { type } : {}) }, select: { userId: true, type: true, email: true, push: true } });
     },
     async setPreferences(userId, prefs) {
       for (const p of prefs) {
-        await db.notificationPreference.upsert({ where: { userId_type: { userId, type: p.type } }, create: { userId, type: p.type, email: p.email }, update: { email: p.email } });
+        const set = { ...(p.email !== undefined ? { email: p.email } : {}), ...(p.push !== undefined ? { push: p.push } : {}) };
+        await db.notificationPreference.upsert({ where: { userId_type: { userId, type: p.type } }, create: { userId, type: p.type, ...set }, update: set });
       }
     },
     async recipients(userIds) {
@@ -41,6 +43,34 @@ export function prismaNotificationStore(db: Db): NotificationStore {
     },
     async updateEmailLog(id, data) {
       await db.emailLog.update({ where: { id }, data });
+    },
+  };
+}
+
+const DEVICE = { id: true, userId: true, platform: true, deviceName: true, appVersion: true, lastSeenAt: true, createdAt: true } as const;
+
+export function prismaPushDeviceStore(db: Db): PushDeviceStore {
+  return {
+    async register(userId, data, max) {
+      const existing = await db.pushDevice.findUnique({ where: { token: data.token }, select: { id: true } });
+      const fields = { userId, platform: data.platform, deviceName: data.deviceName, appVersion: data.appVersion, lastSeenAt: new Date() };
+      // Native INSERT … ON CONFLICT: two registrations of the same token at once can't collide.
+      const device = await db.pushDevice.upsert({ where: { token: data.token }, create: { ...fields, token: data.token }, update: fields, select: DEVICE });
+      const stale = await db.pushDevice.findMany({ where: { userId }, orderBy: [{ lastSeenAt: "desc" }, { id: "desc" }], skip: max, select: { id: true } });
+      if (stale.length) await db.pushDevice.deleteMany({ where: { id: { in: stale.map((s) => s.id) } } });
+      return { device, created: !existing };
+    },
+    list: (userId) => db.pushDevice.findMany({ where: { userId }, orderBy: [{ lastSeenAt: "desc" }, { id: "desc" }], select: DEVICE }),
+    async remove(userId, id) {
+      return (await db.pushDevice.deleteMany({ where: { id, userId } })).count > 0;
+    },
+    async deviceIdsOf(userIds) {
+      if (!userIds.length) return [];
+      return db.pushDevice.findMany({ where: { userId: { in: userIds } }, select: { id: true, userId: true } });
+    },
+    device: (id) => db.pushDevice.findUnique({ where: { id }, select: { id: true, userId: true, token: true } }),
+    async removeDevice(id) {
+      await db.pushDevice.deleteMany({ where: { id } });
     },
   };
 }

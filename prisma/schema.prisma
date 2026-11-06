@@ -154,6 +154,7 @@ model User {
   countLines        StockCountLine[]
   notifications     Notification[]
   notificationPrefs NotificationPreference[]
+  pushDevices       PushDevice[]
 
   posCreated   PurchaseOrder[]         @relation("PoCreatedBy")
   posApproved  PurchaseOrder[]         @relation("PoApprovedBy")
@@ -1301,15 +1302,42 @@ model Notification {
 }
 
 model NotificationPreference {
-  userId String  @db.Uuid
+  userId String   @db.Uuid
   type   String
   /// In-app is always on.
-  inApp  Boolean @default(true)
-  email  Boolean @default(false)
+  inApp  Boolean  @default(true)
+  /// null: the type's default (NotificationType.defaultEmail).
+  email  Boolean?
+  /// Push to the user's phones; null: on (in-app types only).
+  push   Boolean?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, type])
+}
+
+enum PushPlatform {
+  ANDROID
+  IOS
+}
+
+/// A phone signed in to the mobile app, receiving push notifications through Firebase Cloud Messaging.
+model PushDevice {
+  id         String       @id @default(uuid()) @db.Uuid
+  userId     String       @db.Uuid
+  /// FCM registration token. Unique: a phone that signs in as someone else moves to that user.
+  token      String       @unique
+  platform   PushPlatform
+  deviceName String?
+  appVersion String?
+  /// Last registration (the app registers on every start and sign-in).
+  lastSeenAt DateTime     @default(now())
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, lastSeenAt])
 }
 
 enum EmailStatus {

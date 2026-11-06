@@ -1,4 +1,6 @@
 import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { INPUT_MODE, sanitize, type InputKind } from "@/lib/validation";
+import { DateInput } from "./DateInput";
 import { Select } from "./Select";
 import styles from "./Field.module.css";
 
@@ -37,10 +39,44 @@ export interface TextFieldProps extends Omit<InputHTMLAttributes<HTMLInputElemen
   helper?: ReactNode;
   mono?: boolean;
   fieldClassName?: string;
+  /**
+   * Numeric / phone field: blocks characters that can't be part of the value while typing
+   * (letters in amounts, a second ".", too many decimals) and sets the mobile keyboard.
+   * money = 2 decimals, qty = 3, rate = 4, percent = 2, integer = digits only, phone = digits + - ( ) space.
+   */
+  kind?: InputKind;
 }
 
-export function TextField({ label, error, helper, mono, fieldClassName, className, ...props }: TextFieldProps) {
+export function TextField({ label, error, helper, mono, fieldClassName, className, kind, ...props }: TextFieldProps) {
   const id = useId();
+  const { type, ...rest } = props;
+  const inputProps: InputHTMLAttributes<HTMLInputElement> = kind
+    ? {
+        ...props,
+        inputMode: props.inputMode ?? INPUT_MODE[kind],
+        autoComplete: props.autoComplete ?? (kind === "phone" ? "tel" : "off"),
+        onChange: (e) => {
+          const clean = sanitize(kind, e.target.value);
+          if (clean !== e.target.value) e.target.value = clean;
+          props.onChange?.(e);
+        },
+      }
+    : props;
+  if (type === "date" || type === "month") {
+    // Styled calendar instead of the browser's own picker; value / onChange stay the same.
+    return (
+      <FieldShell id={id} label={label} error={error} helper={helper} className={fieldClassName}>
+        <DateInput
+          {...rest}
+          type={type as "date" | "month"}
+          id={id}
+          className={className}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `${id}-error` : helper ? `${id}-helper` : undefined}
+        />
+      </FieldShell>
+    );
+  }
   return (
     <FieldShell id={id} label={label} error={error} helper={helper} className={fieldClassName}>
       <input
@@ -48,7 +84,7 @@ export function TextField({ label, error, helper, mono, fieldClassName, classNam
         className={[styles.input, error ? styles.invalid : "", mono ? styles.mono : "", className].filter(Boolean).join(" ")}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${id}-error` : helper ? `${id}-helper` : undefined}
-        {...props}
+        {...inputProps}
       />
     </FieldShell>
   );
@@ -61,6 +97,8 @@ export interface SelectFieldProps extends Omit<SelectHTMLAttributes<HTMLSelectEl
   fieldClassName?: string;
   /** Hide the label visually (still read by screen readers). */
   hideLabel?: boolean;
+  /** Always show a search box in the list (suppliers, projects, warehouses, …). */
+  searchable?: boolean;
 }
 
 export function SelectField({ label, error, helper, fieldClassName, hideLabel, className, children, ...props }: SelectFieldProps) {

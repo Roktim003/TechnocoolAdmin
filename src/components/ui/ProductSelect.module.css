@@ -1,0 +1,117 @@
+/* Product dropdown: button + portalled panel with its own search box. */
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  min-width: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.placeholder,
+.value {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.placeholder {
+  color: var(--text-3);
+}
+
+.value {
+  color: var(--text);
+}
+
+.chevron {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+/* Portalled to <body>; top / left / width are set inline in page coordinates. */
+.panel {
+  position: absolute;
+  z-index: 1000;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+
+.searchWrap {
+  padding: var(--s-2);
+  border-bottom: 1px solid var(--divider);
+}
+
+.search {
+  width: 100%;
+  height: var(--h-md);
+  padding: 0 var(--s-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+.search::placeholder {
+  color: var(--text-3);
+}
+
+.search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+
+.list {
+  max-height: 280px;
+  margin: 0;
+  padding: var(--s-1);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--s-2);
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.active {
+  background: var(--surface-2);
+}
+
+.name {
+  color: var(--text);
+}
+
+.meta {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.code {
+  font-family: var(--font-mono);
+}
+
+.empty {
+  padding: var(--s-3) var(--s-2);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}

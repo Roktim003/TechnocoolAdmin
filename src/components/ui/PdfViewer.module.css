@@ -1,0 +1,324 @@
+/* In-app PDF viewer: dark backdrop, toolbar on top, the document on a neutral stage. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  place-items: center;
+  padding: var(--s-4);
+  background: color-mix(in srgb, #0b0d12 62%, transparent);
+  backdrop-filter: blur(2px);
+  animation: fade 160ms var(--ease);
+}
+
+.viewer {
+  display: flex;
+  flex-direction: column;
+  width: min(1120px, 100%);
+  height: min(94vh, 100%);
+  overflow: hidden;
+  border-radius: var(--r-modal);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop), 0 30px 80px rgb(0 0 0 / 0.28);
+  animation: rise 200ms var(--ease);
+}
+
+/* ── Toolbar ── */
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  flex: none;
+  padding: var(--s-3) var(--s-3) var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.doc {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 0;
+}
+
+.docIcon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.docIconSheet {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.docText {
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.subtitle {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.meta {
+  margin: 2px 0 0;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: none;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--h-md);
+  padding: 0 var(--s-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.action:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.action:disabled {
+  color: var(--text-4);
+  cursor: default;
+}
+
+.action:focus-visible,
+.close:focus-visible,
+.retry:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 var(--s-1);
+  background: var(--border);
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: var(--h-md);
+  height: var(--h-md);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* ── Document stage ── */
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--sunken);
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--sunken);
+}
+
+.status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--s-6);
+  text-align: center;
+}
+
+.statusTitle {
+  margin: var(--s-4) 0 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.statusText {
+  max-width: 420px;
+  margin: var(--s-1) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.statusIcon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+}
+
+.statusError {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.retry {
+  height: var(--h-md);
+  margin-top: var(--s-4);
+  padding: 0 var(--s-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.retry:hover {
+  background: var(--surface-2);
+}
+
+/* Loading: a shimmering page sketch. */
+.paper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 168px;
+  padding: 22px 18px;
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px rgb(0 0 0 / 0.08);
+}
+
+.paper span {
+  display: block;
+  height: 7px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+
+.paperSheet {
+  width: 220px;
+}
+
+.paper .lineWide {
+  width: 70%;
+  height: 10px;
+}
+
+.paper .lineMid {
+  width: 55%;
+}
+
+.paper .line {
+  width: 100%;
+}
+
+.paper .block {
+  height: 38px;
+  margin: 4px 0;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .viewer,
+  .paper span {
+    animation: none;
+  }
+}
+
+/* Phones: full screen, icon-only extra actions. */
+@media (max-width: 640px) {
+  .overlay {
+    padding: 0;
+  }
+
+  .viewer {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+  }
+
+  .bar {
+    padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  }
+
+  .action {
+    padding: 0 var(--s-2);
+  }
+
+  .action span,
+  .optional {
+    display: none;
+  }
+}

@@ -5,14 +5,18 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { SelectField, TextAreaField } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Tabs } from "@/components/ui/Tabs";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, errorMessage } from "@/lib/api-client";
+import { PdfViewer, type PdfRequest } from "@/components/ui/PdfViewer";
+import { waitForDocument } from "@/lib/documents";
+import { collect, revealProblems, rules } from "@/lib/validation";
 import { formatMoney } from "@/shared/time/format";
 import { newKey } from "../../stock/_components/types";
-import { ActivityTab, CostsTab, DocumentsTab, MaterialTab, MovementsTab } from "./ProjectTabs";
+import { ActivityTab, CostsTab, DocumentsTab, MaterialTab, MovementsTab, reasonProblem } from "./ProjectTabs";
 import { PROJECT_STATUS_LABEL, PROJECT_STATUS_TAG, type ProjectDto, type ProjectsCaps } from "./types";
 import styles from "./projects.module.css";
 
@@ -24,12 +28,16 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
   const [p, setP] = useState(initial);
   const [tab, setTab] = useState<TabKey>(TABS.includes(initialTab as TabKey) ? (initialTab as TabKey) : "material");
   const [notice, setNotice] = useState<{ kind: "success" | "error" | "info"; title?: string; message: string } | null>(saved ? { kind: "success", message: "Project saved." } : null);
+  const [pdfReq, setPdfReq] = useState<PdfRequest | null>(null);
+  const closePdf = useCallback(() => setPdfReq(null), []);
   const [costCount, setCostCount] = useState<number | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
   const [toStatus, setToStatus] = useState("");
   const [reason, setReason] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [statusAttempt, setStatusAttempt] = useState(false);
+  const statusRef = useRef<HTMLDivElement>(null);
   const keyRef = useRef(newKey());
 
   useEffect(() => {
@@ -59,7 +67,13 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
   const transitions = p.actions.transitions;
   const chosen = transitions.find((t) => t.toStatus === toStatus);
 
+  // Browser-side checks (same rules as the server's ChangeStatusSchema + required-reason transitions).
+  const statusProblems = collect(["toStatus", rules.chosen(toStatus, "the new status")], ["reason", reasonProblem(reason, !!chosen?.reasonRequired)]);
+  const statusErrors = { ...fieldErrors, ...(statusAttempt ? statusProblems : {}) };
+
   async function changeStatus() {
+    setStatusAttempt(true);
+    if (Object.keys(statusProblems).length) return revealProblems(statusRef.current?.parentElement);
     setBusy("status");
     setFieldErrors({});
     try {
@@ -81,25 +95,16 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
     }
   }
 
-  async function pdf() {
-    setBusy("pdf");
-    try {
-      const job = (await api<{ data: { jobId: string } }>(`/projects/${p.id}/documents`, { method: "POST" })).data;
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 800));
-        const s = (await api<{ data: { status: string; downloadUrl: string | null; failedReason: string | null } }>(`/documents/${job.jobId}`)).data;
-        if (s.status === "completed" && s.downloadUrl) {
-          window.open(s.downloadUrl, "_blank", "noopener");
-          return;
-        }
-        if (s.status === "failed") throw new Error(s.failedReason ?? "The PDF couldn't be created.");
-      }
-      throw new Error("The PDF is taking too long. Try again in a minute.");
-    } catch (err) {
-      setNotice({ kind: "error", title: "Couldn't create the cost statement", message: errorMessage(err) });
-    } finally {
-      setBusy(null);
-    }
+  /** Opens the PDF viewer; it shows a loader while the worker renders the document. */
+  function pdf() {
+    setPdfReq({
+      title: "Cost statement",
+      subtitle: p.code,
+      load: async (signal) => {
+        const job = (await api<{ data: { jobId: string } }>(`/projects/${p.id}/documents`, { method: "POST" })).data;
+        return waitForDocument(job.jobId, `${p.code}.pdf`, signal);
+      },
+    });
   }
 
   const s = p.summary;
@@ -147,6 +152,7 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
                   setToStatus(transitions[0]!.toStatus);
                   setReason("");
                   setFieldErrors({});
+                  setStatusAttempt(false);
                   setStatusOpen(true);
                 }}
               >
@@ -159,10 +165,11 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
               </Link>
             ) : null}
             {p.actions.costStatement ? (
-              <Button kind="secondary" onClick={pdf} disabled={busy === "pdf"}>
-                {busy === "pdf" ? "Preparing PDF…" : "Cost statement PDF"}
+              <Button kind="secondary" onClick={pdf} disabled={!!pdfReq}>
+                Cost statement PDF
               </Button>
             ) : null}
+            <PdfViewer request={pdfReq} onClose={closePdf} />
           </div>
         </div>
         <dl className={styles.info}>
@@ -263,8 +270,9 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
       </div>
 
       <Modal open={statusOpen} title="Change status" label={`${p.code} · now ${PROJECT_STATUS_LABEL[p.status].toLowerCase()}`} primaryText="Change status" submitting={busy === "status"} onClose={() => setStatusOpen(false)} onSubmit={() => void changeStatus()}>
-        <div style={{ display: "grid", gap: "var(--space-5)" }}>
-          <SelectField label="New status" value={toStatus} onChange={(e) => setToStatus(e.target.value)} error={fieldErrors.toStatus}>
+        <FormProblems problems={statusAttempt ? statusProblems : {}} labels={{ toStatus: "New status", reason: "Reason" }} />
+        <div ref={statusRef} style={{ display: "grid", gap: "var(--space-5)" }}>
+          <SelectField label="New status" value={toStatus} onChange={(e) => (setToStatus(e.target.value), setFieldErrors({}))} error={statusErrors.toStatus}>
             {transitions.map((t) => (
               <option key={t.toStatus} value={t.toStatus}>
                 {t.label} → {PROJECT_STATUS_LABEL[t.toStatus]}
@@ -273,7 +281,7 @@ export function ProjectDetail({ caps, initial, saved, initialTab }: { caps: Proj
           </SelectField>
           {toStatus === "COMPLETED" && p.status === "RUNNING" ? <p className={styles.meta}>Sets the completion date to today. Material can&apos;t be issued to a completed project; returns are still accepted.</p> : null}
           {toStatus === "CLOSED" ? <p className={styles.meta}>Closing is refused while stock entries for this project are pending or a transfer hasn&apos;t been received. A closed project can&apos;t take returns or costs.</p> : null}
-          <TextAreaField label={chosen?.reasonRequired ? "Reason *" : "Reason (optional)"} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} error={fieldErrors.reason} />
+          <TextAreaField label={chosen?.reasonRequired ? "Reason *" : "Reason (optional)"} rows={3} value={reason} onChange={(e) => (setReason(e.target.value), setFieldErrors({}))} error={statusErrors.reason} />
         </div>
       </Modal>
     </>

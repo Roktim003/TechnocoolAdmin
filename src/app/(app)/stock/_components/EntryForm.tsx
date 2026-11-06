@@ -7,10 +7,11 @@ import { Select } from "@/components/ui/Select";
 import { Checkbox, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { Notification } from "@/components/ui/Notification";
 import { api, ApiError, errorMessage } from "@/lib/api-client";
+import { sanitize } from "@/lib/validation";
 import { formatMoney } from "@/shared/time/format";
 import type { ReceivableDto, ReceivableSummaryDto } from "../../purchases/_components/types";
 import { ProductPicker } from "./ProductPicker";
-import { ImportDocuments } from "./ImportDocuments";
+import { checkShipment, ImportDocuments, SHIPMENT_LABELS } from "./ImportDocuments";
 import {
   DEFAULT_REQUIRED,
   emptyAttachments,
@@ -180,7 +181,10 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
   const [confirmBelowCost, setConfirmBelowCost] = useState(false);
   const [calc, setCalc] = useState<Calc | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  // Field errors from the server; line errors are keyed `line:<line key>:<field>`.
+  const [serverErrors, setErrors] = useState<Record<string, string>>({});
+  // The last save the user tried: from then on the form checks itself live and marks what's missing.
+  const [attempt, setAttempt] = useState<"draft" | "submit" | "post" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [suppliers, setSuppliers] = useState<SupplierDto[]>([]);
@@ -369,10 +373,87 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
 
   const updateLine = (key: string, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
+  // Server field errors describe the form as it was sent: drop them once the user edits it
+  // (the live check below keeps marking whatever is still missing).
+  useEffect(() => {
+    setErrors((e) => (Object.keys(e).length ? {} : e));
+  }, [header, lines]);
+
+  /**
+   * What is missing or wrong, checked in the browser so the user sees every problem at once
+   * (the server stops at the first). Drafts only need valid numbers; submitting or posting
+   * also needs the party, reason, rate and serials the entry type requires.
+   */
+  function check(action: "draft" | "submit" | "post"): Record<string, string> {
+    const out: Record<string, string> = {};
+    const full = action !== "draft";
+    if (!header.warehouseId) out.warehouseId = "Choose a warehouse.";
+    if (full) {
+      if (needs.toWarehouse) {
+        if (!header.toWarehouseId) out.toWarehouseId = "Choose the destination warehouse.";
+        else if (header.toWarehouseId === header.warehouseId) out.toWarehouseId = "Choose a different warehouse.";
+      }
+      if (needs.supplier && !po && !header.supplierId) out.supplierId = "Choose a supplier.";
+      if (needs.customer && !header.customerId) out.customerId = "Choose a customer.";
+      if (needs.project && !header.projectId) out.projectId = "Choose a project.";
+      if (type === "DAMAGE_WRITE_OFF" && !header.reason?.trim()) out.reason = "Give a reason for the write-off.";
+      if (type === "GRN_IMPORT" && !po && !header.exchangeRate?.trim()) out.exchangeRate = "Enter the exchange rate.";
+    }
+    if (type === "GRN_IMPORT" && header.exchangeRate?.trim() && !(/^\d+(\.\d{1,4})?$/.test(header.exchangeRate.trim()) && /[1-9]/.test(header.exchangeRate))) out.exchangeRate = "Enter a rate above 0 with at most 4 decimals.";
+
+    const costPriced = meta.price === "COST_BDT" || meta.price === "COST_FOREIGN";
+    for (const l of lines) {
+      const k = (f: string) => `line:${l.key}:${f}`;
+      if (!l.product) {
+        if (l.qty.trim() || l.unitPrice.trim()) out[k("product")] = "Choose a product.";
+        continue;
+      }
+      const qty = l.qty.trim();
+      if (!qty) out[k("qty")] = "Enter a quantity.";
+      else if (!/^\d+(\.\d{1,3})?$/.test(qty)) out[k("qty")] = "Use a number with at most 3 decimals.";
+      else if (!/[1-9]/.test(qty)) out[k("qty")] = "Must be more than 0.";
+      else if (l.product.trackSerial && qty.includes(".") && /\.\d*[1-9]/.test(qty)) out[k("qty")] = "Serial-tracked: whole units only.";
+
+      if (needs.price && !po) {
+        const price = l.unitPrice.trim();
+        if (price && !/^\d+(\.\d{1,4})?$/.test(price)) out[k("unitPrice")] = "Use a number with at most 4 decimals.";
+        else if (!price && full && costPriced) out[k("unitPrice")] = "Enter the unit cost (0 if free).";
+      }
+
+      if (full && l.product.trackSerial && !out[k("qty")]) {
+        const n = parseSerials(l.serials).length;
+        const want = Number(qty);
+        if (n !== want) out[k("serials")] = `Enter ${want} serial number${want === 1 ? "" : "s"} (${n} entered).`;
+      }
+    }
+    if (!lines.some((l) => l.product)) out.lines = "Add at least one product.";
+    // GRN (Imported): shipment details (BL, packing list, invoice…) — keys match the server's importShipment.* paths.
+    if (type === "GRN_IMPORT") for (const [key, msg] of Object.entries(checkShipment(shipment, caps.seeCost))) out[`importShipment.${key}`] = msg;
+    return out;
+  }
+
+  /** Server paths `lines.<n>.<field>` count only lines with a product; map them to the rows on screen. */
+  function mapServerErrors(fieldErrors: Record<string, string>): Record<string, string> {
+    const sent = lines.filter((l) => l.product);
+    const out: Record<string, string> = {};
+    for (const [path, message] of Object.entries(fieldErrors)) {
+      const m = /^lines\.(\d+)(?:\.(\w+))?/.exec(path);
+      const line = m ? sent[Number(m[1])] : undefined;
+      if (line) out[`line:${line.key}:${m![2] === "serials" || m![2] === "unitPrice" ? m![2] : m![2] === "productId" ? "product" : "qty"}`] = message;
+      else out[path] = message;
+    }
+    return out;
+  }
+
   async function save(action: "draft" | "submit" | "post") {
-    setSaving(action);
     setErrors({});
     setFormError(null);
+    setAttempt(action);
+    if (Object.keys(check(action)).length) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    setSaving(action);
     const body = payload();
     try {
       let saved: EntryDto;
@@ -389,9 +470,16 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
     } catch (err) {
       keyRef.current = newKey(); // the request failed: the next attempt is a new action
       if (err instanceof ApiError) {
-        setErrors(err.fieldErrors());
+        const fields = mapServerErrors(err.fieldErrors());
+        setErrors(fields);
         const docs = err.details.filter((d) => d.code === "IMPORT_DOCS_MISSING");
-        setFormError(docs.length ? `Import documents are missing. Needed before posting: ${docs.map((d) => d.message).join("; ")}.` : err.message);
+        setFormError(
+          docs.length
+            ? `Import documents are missing. Needed before posting: ${docs.map((d) => d.message).join("; ")}.`
+            : Object.keys(fields).length
+              ? `Some details need fixing: ${[...new Set(Object.values(fields))].join(" ")} The fields are marked in red below.`
+              : err.message,
+        );
       } else setFormError(errorMessage(err));
       window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
@@ -425,6 +513,18 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
     return draftSaving.current;
   }
 
+  const problems = attempt ? check(attempt) : {};
+  const errors: Record<string, string> = { ...serverErrors, ...problems };
+  const rowNo = (key: string) => lines.findIndex((l) => l.key === key) + 1;
+  const FIELD_LABEL: Record<string, string> = { warehouseId: type === "TRANSFER" ? "From warehouse" : "Warehouse", toWarehouseId: "To warehouse", supplierId: "Supplier", customerId: "Customer", projectId: "Project", reason: "Reason", exchangeRate: "Exchange rate", lines: "Products" };
+  const LINE_FIELD: Record<string, string> = { product: "product", qty: "quantity", unitPrice: "price", serials: "serial numbers" };
+  const problemList = Object.entries(problems).map(([k, msg]) => {
+    const m = /^line:(.+):(\w+)$/.exec(k);
+    const shipmentKey = k.startsWith("importShipment.") ? k.slice("importShipment.".length) : null;
+    return { key: k, label: m ? `Line ${rowNo(m[1]!)} ${LINE_FIELD[m[2]!] ?? m[2]}` : shipmentKey ? (SHIPMENT_LABELS[shipmentKey] ?? shipmentKey) : (FIELD_LABEL[k] ?? k), msg };
+  });
+  const lineError = (l: Line, f: string) => errors[`line:${l.key}:${f}`];
+
   const belowCost = calc?.warnings.some((w) => w.code === "BELOW_COST") ?? false;
   const blocking = calc?.warnings.some((w) => ["INSUFFICIENT_STOCK", "SERIAL_COUNT", "OVER_RECEIPT"].includes(w.code)) ?? false;
   // The server matches by PO line, else by product.
@@ -452,6 +552,17 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
             </span>
           ))}{" "}
           is counting this warehouse. Entries for the counted products can&apos;t be posted until the count is approved or cancelled.
+        </Notification>
+      ) : null}
+      {problemList.length ? (
+        <Notification kind="error" title={problemList.length === 1 ? "1 thing to fix before saving" : `${problemList.length} things to fix before saving`}>
+          <ul className={styles.problemList}>
+            {problemList.map((p) => (
+              <li key={p.key}>
+                <strong>{p.label}:</strong> {p.msg}
+              </li>
+            ))}
+          </ul>
         </Notification>
       ) : null}
       {formError ? (
@@ -527,7 +638,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
         </h2>
         <div className={styles.grid}>
           <TextField label="Date" type="date" max={today()} value={header.entryDate ?? ""} onChange={(e) => set("entryDate", e.target.value)} error={errors.entryDate} />
-          <SelectField label={type === "TRANSFER" ? "From warehouse" : "Warehouse"} value={header.warehouseId ?? ""} onChange={(e) => set("warehouseId", e.target.value)} error={errors.warehouseId} disabled={!!po} helper={po ? "The PO's delivery warehouse." : undefined}>
+          <SelectField searchable label={type === "TRANSFER" ? "From warehouse" : "Warehouse"} value={header.warehouseId ?? ""} onChange={(e) => set("warehouseId", e.target.value)} error={errors.warehouseId} disabled={!!po} helper={po ? "The PO's delivery warehouse." : undefined}>
             {myWarehouses.map((w) => (
               <option key={w.id} value={w.id}>
                 {w.name}
@@ -535,7 +646,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
             ))}
           </SelectField>
           {needs.toWarehouse ? (
-            <SelectField label="To warehouse" value={header.toWarehouseId ?? ""} onChange={(e) => set("toWarehouseId", e.target.value)} error={errors.toWarehouseId}>
+            <SelectField searchable label="To warehouse" value={header.toWarehouseId ?? ""} onChange={(e) => set("toWarehouseId", e.target.value)} error={errors.toWarehouseId}>
               <option value="">Choose…</option>
               {warehouses
                 .filter((w) => w.isActive && w.id !== header.warehouseId)
@@ -547,7 +658,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
             </SelectField>
           ) : null}
           {needs.supplier ? (
-            <SelectField
+            <SelectField searchable
               label="Supplier"
               value={header.supplierId ?? ""}
               onChange={(e) => {
@@ -570,7 +681,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
             </SelectField>
           ) : null}
           {GRN_TYPES.includes(type) && !po ? (
-            <SelectField
+            <SelectField searchable
               label="Purchase order (optional)"
               value=""
               onChange={(e) => e.target.value && void linkPo(e.target.value)}
@@ -586,7 +697,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
             </SelectField>
           ) : null}
           {needs.customer ? (
-            <SelectField
+            <SelectField searchable
               label="Customer"
               value={header.customerId ?? ""}
               onChange={(e) => {
@@ -606,7 +717,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
             </SelectField>
           ) : null}
           {needs.project ? (
-            <SelectField
+            <SelectField searchable
               label="Project"
               value={header.projectId ?? ""}
               onChange={(e) => {
@@ -632,7 +743,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
             </SelectField>
           ) : null}
           {needs.original ? (
-            <SelectField
+            <SelectField searchable
               label={type === "RETURN_FROM_SITE" ? "Original issue (optional)" : "Original GRN (optional)"}
               value={header.originalEntryId ?? ""}
               onChange={(e) => {
@@ -659,7 +770,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
               </SelectField>
               <TextField
                 label="Exchange rate (৳ per unit)"
-                inputMode="decimal"
+                kind="rate"
                 value={header.exchangeRate ?? ""}
                 onChange={(e) => set("exchangeRate", e.target.value)}
                 error={errors.exchangeRate}
@@ -686,10 +797,10 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
           {["ISSUE_TO_PROJECT", "SALE", "TRANSFER"].includes(type) ? <TextField label="Vehicle" value={header.vehicle ?? ""} onChange={(e) => set("vehicle", e.target.value)} placeholder="DHA-METRO-11-2233" /> : null}
           {type === "SALE" ? (
             <>
-              <TextField label="Customer phone" value={header.customerPhone ?? ""} onChange={(e) => set("customerPhone", e.target.value)} />
+              <TextField label="Customer phone" kind="phone" placeholder="e.g. 01711-000000" value={header.customerPhone ?? ""} onChange={(e) => set("customerPhone", e.target.value)} />
               <TextField label="Delivery address" value={header.customerAddress ?? ""} onChange={(e) => set("customerAddress", e.target.value)} />
-              <TextField label="Discount (৳)" inputMode="decimal" value={header.discountAmount ?? ""} onChange={(e) => set("discountAmount", e.target.value)} error={errors.discountAmount} />
-              <TextField label="VAT %" inputMode="decimal" value={header.vatPercent ?? ""} onChange={(e) => set("vatPercent", e.target.value)} error={errors.vatPercent} />
+              <TextField label="Discount (৳)" kind="money" value={header.discountAmount ?? ""} onChange={(e) => set("discountAmount", e.target.value)} error={errors.discountAmount} />
+              <TextField label="VAT %" kind="percent" value={header.vatPercent ?? ""} onChange={(e) => set("vatPercent", e.target.value)} error={errors.vatPercent} />
             </>
           ) : null}
           {["DAMAGE_WRITE_OFF", "RETURN_TO_SUPPLIER", "RETURN_FROM_SITE"].includes(type) ? (
@@ -736,7 +847,9 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
                         value={l.product}
                         activeOnly={!["RETURN_FROM_SITE", "RETURN_TO_SUPPLIER", "DAMAGE_WRITE_OFF", "TRANSFER"].includes(type)}
                         onChange={(p) => updateLine(l.key, { product: p, unitPrice: p && type === "SALE" ? p.sellingPrice : l.unitPrice, serials: "" })}
+                        invalid={!!lineError(l, "product") || (!!errors.lines && i === 0 && !l.product)}
                       />
+                      {lineError(l, "product") ? <div className={styles.lineWarn}>{lineError(l, "product")}</div> : null}
                       {lc && OUT_SERIAL_TYPES.concat("TRANSFER").includes(type) ? (
                         <div className={lc.insufficient ? styles.lineWarn : styles.lineMeta}>
                           Available: {formatQty(lc.available)} {l.product?.unit.code}
@@ -776,6 +889,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
                             rows={2}
                             value={l.serials}
                             onChange={(e) => updateLine(l.key, { serials: e.target.value })}
+                            error={lineError(l, "serials")}
                             helper="One per line, or separated by commas. Scanners work here."
                           />
                           {options.length ? (
@@ -800,8 +914,16 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
                       ) : null}
                     </td>
                     <td className={styles.right}>
-                      <input className={styles.cellInput} inputMode="decimal" aria-label={`Quantity, line ${i + 1}`} value={l.qty} onChange={(e) => updateLine(l.key, { qty: e.target.value })} />
-                      {l.product ? <div className={styles.lineMeta}>{l.product.unit.code}</div> : null}
+                      <input
+                        className={`${styles.cellInput} ${lineError(l, "qty") ? styles.cellInputError : ""}`}
+                        inputMode="decimal"
+                        aria-label={`Quantity, line ${i + 1}`}
+                        aria-invalid={lineError(l, "qty") ? true : undefined}
+                        placeholder={l.product ? "0" : undefined}
+                        value={l.qty}
+                        onChange={(e) => updateLine(l.key, { qty: sanitize("qty", e.target.value) })}
+                      />
+                      {lineError(l, "qty") ? <div className={styles.lineWarn}>{lineError(l, "qty")}</div> : l.product ? <div className={styles.lineMeta}>{l.product.unit.code}</div> : null}
                     </td>
                     {needs.price && po ? (
                       <td className={`${styles.right} ${styles.num}`}>
@@ -810,7 +932,15 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
                       </td>
                     ) : needs.price ? (
                       <td className={styles.right}>
-                        <input className={styles.cellInput} inputMode="decimal" aria-label={`${priceLabel}, line ${i + 1}`} value={l.unitPrice} onChange={(e) => updateLine(l.key, { unitPrice: e.target.value })} />
+                        <input
+                          className={`${styles.cellInput} ${lineError(l, "unitPrice") ? styles.cellInputError : ""}`}
+                          inputMode="decimal"
+                          aria-label={`${priceLabel}, line ${i + 1}`}
+                          aria-invalid={lineError(l, "unitPrice") ? true : undefined}
+                          value={l.unitPrice}
+                          onChange={(e) => updateLine(l.key, { unitPrice: sanitize("rate", e.target.value) })}
+                        />
+                        {lineError(l, "unitPrice") ? <div className={styles.lineWarn}>{lineError(l, "unitPrice")}</div> : null}
                         {type === "GRN_IMPORT" && caps.seeCost && lc?.landedUnitCost ? <div className={styles.lineMeta}>Landed {formatMoney(lc.landedUnitCost)}</div> : null}
                       </td>
                     ) : null}
@@ -905,7 +1035,7 @@ export function EntryForm({ caps, warehouses, entry, defaultVat, requiredDocs, i
                           </Select>
                         </td>
                         <td className={styles.right}>
-                          <input className={styles.cellInput} inputMode="decimal" aria-label={`Charge value ${i + 1}`} value={c.value} onChange={(e) => upd({ value: e.target.value })} />
+                          <input className={styles.cellInput} inputMode="decimal" aria-label={`Charge value ${i + 1}`} value={c.value} onChange={(e) => upd({ value: sanitize("rate", e.target.value) })} />
                         </td>
                         <td>
                           <Checkbox label="In cost" checked={c.includeInCost} onChange={(e) => upd({ includeInCost: e.target.checked })} />

@@ -6,12 +6,15 @@ import * as unreadRoute from "@/app/api/v1/notifications/unread-count/route";
 import * as readRoute from "@/app/api/v1/notifications/[id]/read/route";
 import * as readAllRoute from "@/app/api/v1/notifications/read-all/route";
 import * as prefsRoute from "@/app/api/v1/notification-preferences/route";
+import * as devicesRoute from "@/app/api/v1/push-devices/route";
+import * as deviceRoute from "@/app/api/v1/push-devices/[id]/route";
+import * as openapiRoute from "@/app/api/v1/openapi.json/route";
 import * as alertSettingsRoute from "@/app/api/v1/alert-settings/route";
 import * as lowStockRoute from "@/app/api/v1/stock/low-stock/route";
 import * as lowStockExportRoute from "@/app/api/v1/stock/low-stock/export/route";
 import { inventory } from "@/modules/inventory/interface/container";
-import { processEmailJob, setMailer } from "@/modules/notifications/interface/container";
-import type { EmailMessage } from "@/modules/notifications/application/ports";
+import { processEmailJob, processPushJob, setMailer, setPushSender } from "@/modules/notifications/interface/container";
+import type { EmailMessage, PushMessage, PushResult } from "@/modules/notifications/application/ports";
 import { getQueue, queuePrefix, QUEUES } from "@/shared/queue/queue";
 import { bullConnection } from "@/shared/redis/redis";
 import { logger } from "@/shared/logger/logger";
@@ -310,5 +313,164 @@ describe("low stock", () => {
     expect(await getQueue(QUEUES.alerts).getJobScheduler("low-stock-digest")).toBeFalsy();
     expect(await inventory().alerts.digest()).toEqual({ products: 0, emailed: 0 });
     void key;
+  });
+});
+
+/* ───────────────────────────── push (mobile app) ───────────────────────────── */
+
+describe("push notifications", () => {
+  /** A fake FCM: per-token answers, records what was sent. */
+  function fakeFcm(answer: (token: string) => PushResult = () => ({ ok: true })) {
+    const sent: PushMessage[] = [];
+    setPushSender({
+      configured: true,
+      async send(m) {
+        sent.push(m);
+        return answer(m.token);
+      },
+    });
+    return sent;
+  }
+  const fcm = (s: string) => `${s}-fcm-token-${"x".repeat(24)}`;
+  const register = (tok: string, fcmToken: string, extra: Record<string, unknown> = {}) =>
+    call(devicesRoute.POST, "POST", "/push-devices", { token: tok, body: { token: fcmToken, platform: "android", deviceName: "Galaxy A15", appVersion: "1.0.0", ...extra } });
+  const myDevices = async (tok: string) => (await call(devicesRoute.GET, "GET", "/push-devices", { token: tok })).body.data as any[];
+  const pushJobs = async () => (await getQueue(QUEUES.push).getJobs(["waiting", "delayed"])).sort((a, b) => a.timestamp - b.timestamp || a.data.deviceId.localeCompare(b.data.deviceId));
+
+  afterEach(() => setPushSender(null));
+  afterAll(async () => {
+    await getQueue(QUEUES.push).close();
+  });
+
+  it("registers phones (own only); a token moves to whoever signs in on that phone; at most 10 per user", async () => {
+    const a = await person("Store Manager", ["A"]);
+    const b = await person("Manager", ["A"]);
+    const first = await register(a.token, fcm("one"));
+    expect(first.status).toBe(201);
+    expect(first.body.data).toMatchObject({ platform: "ANDROID", deviceName: "Galaxy A15", appVersion: "1.0.0" });
+    expect(first.body.data).not.toHaveProperty("token");
+    const again = await register(a.token, fcm("one"), { appVersion: "1.0.1" });
+    expect(again.status).toBe(200);
+    expect(again.body.data).toMatchObject({ id: first.body.data.id, appVersion: "1.0.1" });
+    expect((await register(a.token, fcm("two"), { platform: "WINDOWS" })).status).toBe(400);
+    expect((await register(a.token, "short")).status).toBe(400);
+    expect((await call(devicesRoute.POST, "POST", "/push-devices", { body: { token: fcm("anon"), platform: "IOS" } })).status).toBe(401);
+
+    // Someone else signs in on the same phone.
+    expect((await register(b.token, fcm("one"), { platform: "IOS" })).status).toBe(200);
+    expect(await myDevices(a.token)).toEqual([]);
+    const [moved] = await myDevices(b.token);
+    expect(moved).toMatchObject({ id: first.body.data.id, platform: "IOS" });
+
+    const remove = (tok: string, id: string) => call(deviceRoute.DELETE, "DELETE", `/push-devices/${id}`, { token: tok, params: { id } });
+    expect((await remove(a.token, moved.id)).status).toBe(404); // not theirs
+    expect((await remove(b.token, "not-a-uuid")).status).toBe(404);
+    expect((await remove(b.token, moved.id)).status).toBe(204);
+    expect((await remove(b.token, moved.id)).status).toBe(404);
+
+    for (let i = 1; i <= 10; i++) await register(a.token, fcm(`phone${i}`));
+    await prisma.pushDevice.update({ where: { token: fcm("phone1") }, data: { lastSeenAt: new Date("2026-01-01T00:00:00Z") } });
+    await register(a.token, fcm("phone11"));
+    const kept = await prisma.pushDevice.findMany({ where: { userId: a.id } });
+    expect(kept).toHaveLength(10);
+    expect(kept.map((d) => d.token)).not.toContain(fcm("phone1")); // least recently seen dropped
+  });
+
+  it("each notification queues one push per phone with its notification id; the push preference can turn a type off", async () => {
+    fakeFcm();
+    const p = await product(token);
+    await grn(token, A, [{ productId: p.id, qty: 10, unitPrice: "10" }]);
+    const creator = await person("Store Manager", ["A"]);
+    const twoPhones = await person("Manager", ["A"]);
+    const muted = await person("Manager", ["A"]);
+    const noPhone = await person("Accounts", ["A"]);
+    await register(twoPhones.token, fcm("m1"));
+    await register(twoPhones.token, fcm("m2"), { platform: "IOS" });
+    await register(muted.token, fcm("muted"));
+    await register(creator.token, fcm("creator"));
+    const res = await call(prefsRoute.PATCH, "PATCH", "/notification-preferences", { token: muted.token, body: { preferences: [{ type: "STOCK_ENTRY_SUBMITTED", push: false }] } });
+    expect(res.body.data.find((x: any) => x.type === "STOCK_ENTRY_SUBMITTED")).toMatchObject({ push: false, email: true }); // email keeps its default
+
+    const e = (await createEntry(creator.token, { ...issue(p.id, 1), action: "submit", projectId: await project() })).body.data;
+    const [n] = await inbox(twoPhones.id, "STOCK_ENTRY_SUBMITTED");
+    const jobs = await pushJobs();
+    expect(jobs.map((j) => j.data.userId)).toEqual([twoPhones.id, twoPhones.id]);
+    expect(jobs[0]!.data).toMatchObject({ notificationId: n!.id, type: "STOCK_ENTRY_SUBMITTED", title: n!.title, body: n!.body, link: `/stock/${e.id}` });
+    expect(jobs[0]!.opts).toMatchObject({ attempts: 4, backoff: { type: "exponential", delay: 5000 } });
+    expect(await inbox(muted.id, "STOCK_ENTRY_SUBMITTED")).toHaveLength(1); // still in-app
+    expect((await prisma.emailLog.findMany({ where: { type: "STOCK_ENTRY_SUBMITTED" } })).map((l) => l.to)).toEqual(expect.arrayContaining([muted.email, noPhone.email]));
+
+    // Without FCM configured nothing is queued.
+    setPushSender(null);
+    await getQueue(QUEUES.push).obliterate({ force: true });
+    await createEntry(creator.token, { ...issue(p.id, 1), action: "submit", projectId: await project() });
+    expect(await pushJobs()).toHaveLength(0);
+  });
+
+  it("the worker sends with the unread count as badge, removes dead tokens, retries temporary errors and skips phones that moved", async () => {
+    const sent = fakeFcm((t) =>
+      t === fcm("dead") ? { ok: false, error: "FCM 404 UNREGISTERED", invalidToken: true, retryable: false } : t === fcm("busy") ? { ok: false, error: "FCM 503 UNAVAILABLE", invalidToken: false, retryable: true } : { ok: true },
+    );
+    const p = await product(token);
+    await grn(token, A, [{ productId: p.id, qty: 10, unitPrice: "10" }]);
+    const creator = await person("Store Manager", ["A"]);
+    const mgr = await person("Manager", ["A"]);
+    const other = await person("Manager", ["B"]);
+    for (const name of ["good", "dead", "busy", "moved"]) await register(mgr.token, fcm(name));
+    await createEntry(creator.token, { ...issue(p.id, 1), action: "submit", projectId: await project() });
+    await createEntry(creator.token, { ...issue(p.id, 1), action: "submit", projectId: await project() });
+    await register(other.token, fcm("moved")); // signs in on that phone before the push goes out
+
+    const deviceOf = async (name: string) => (await prisma.pushDevice.findUnique({ where: { token: fcm(name) } }))?.id;
+    const ids = { good: await deviceOf("good"), dead: await deviceOf("dead"), busy: await deviceOf("busy"), moved: await deviceOf("moved") };
+    const jobs = await pushJobs();
+    expect(jobs).toHaveLength(8); // 2 notifications × 4 phones
+    const jobFor = (name: keyof typeof ids, nth = 0) => jobs.filter((j) => j.data.deviceId === ids[name])[nth]!;
+
+    expect(await processPushJob(jobFor("good"), logger)).toBe("SENT");
+    expect(sent.at(-1)).toMatchObject({ token: fcm("good"), badge: 2, data: { type: "STOCK_ENTRY_SUBMITTED", link: expect.stringMatching(/^\/stock\//), notificationId: expect.any(String) } });
+    expect(await processPushJob(jobFor("dead"), logger)).toBe("INVALID_TOKEN");
+    expect(await deviceOf("dead")).toBeUndefined();
+    await expect(processPushJob(jobFor("busy"), logger)).rejects.toThrow("FCM 503 UNAVAILABLE");
+    expect(await deviceOf("busy")).toBeTruthy();
+    expect(await processPushJob(jobFor("moved"), logger)).toBe("GONE");
+    expect(sent.map((m) => m.token)).not.toContain(fcm("moved"));
+
+    // Reading notifications lowers the badge on the next push.
+    await call(readAllRoute.POST, "POST", "/x", { token: mgr.token });
+    await processPushJob(jobFor("good", 1), logger);
+    expect(sent.at(-1)!.badge).toBe(0);
+
+    setPushSender(null);
+    expect(await processPushJob(jobFor("good", 1), logger)).toBe("SKIPPED");
+  });
+
+  it("preferences: push per in-app type, none for email-only types; each change touches only the channels given", async () => {
+    const u = await person("Manager", ["A"]);
+    const get = async () => (await call(prefsRoute.GET, "GET", "/notification-preferences", { token: u.token })).body.data as any[];
+    const of = (list: any[], type: string) => list.find((x) => x.type === type);
+    let prefs = await get();
+    expect(of(prefs, "STOCK_ENTRY_APPROVED")).toMatchObject({ inApp: true, push: true, email: false });
+    expect(of(prefs, "LOW_STOCK_DIGEST")).toMatchObject({ inApp: false, push: false, email: true });
+
+    const patch = (preferences: unknown[]) => call(prefsRoute.PATCH, "PATCH", "/notification-preferences", { token: u.token, body: { preferences } });
+    expect((await patch([{ type: "STOCK_ENTRY_APPROVED", email: true }])).status).toBe(200);
+    expect((await patch([{ type: "STOCK_ENTRY_APPROVED", push: false }])).status).toBe(200);
+    prefs = await get();
+    expect(of(prefs, "STOCK_ENTRY_APPROVED")).toMatchObject({ push: false, email: true });
+    expect((await patch([{ type: "LOW_STOCK_DIGEST", push: true }])).status).toBe(400);
+    expect((await patch([{ type: "STOCK_ENTRY_APPROVED" }])).status).toBe(400);
+
+    // The digests read the stored email choice directly: an explicit "off" still turns them off.
+    expect((await patch([{ type: "LOW_STOCK_DIGEST", email: false }])).status).toBe(200);
+    expect(of(await get(), "LOW_STOCK_DIGEST").email).toBe(false);
+  });
+
+  it("is documented in OpenAPI", async () => {
+    const doc = await (await openapiRoute.GET()).json();
+    const ops = Object.entries(doc.paths as Record<string, object>).flatMap(([p, methods]) => Object.keys(methods).map((m) => `${m.toUpperCase()} ${p}`));
+    expect(ops).toEqual(expect.arrayContaining(["GET /push-devices", "POST /push-devices", "DELETE /push-devices/{id}", "GET /notification-preferences", "PATCH /notification-preferences"]));
+    expect(doc.components.schemas.NotificationPreferenceItem.properties).toHaveProperty("push");
+    expect(doc.components.schemas.PushDeviceItem.properties).not.toHaveProperty("token");
   });
 });

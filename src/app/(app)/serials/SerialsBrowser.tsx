@@ -23,6 +23,19 @@ interface HistoryRow {
   toWarehouse: string | null;
 }
 
+interface Arrival {
+  entry: { id: string; number: string | null; type: EntryType };
+  entryDate: string;
+  warehouseCode: string;
+  supplierName: string | null;
+  countryOfOrigin: string | null;
+  blNo: string | null;
+  boeNo: string | null;
+  boeDate: string | null;
+}
+
+type SerialDetail = SerialDto & { cameIn: Arrival | null; history: HistoryRow[] };
+
 const STATUS_TAG: Record<string, TagKind> = { IN_STOCK: "green", RESERVED: "yellow", IN_TRANSIT: "purple", ISSUED: "blue", SOLD: "blue", RETURNED_TO_SUPPLIER: "gray", WRITTEN_OFF: "gray", DAMAGED: "red" };
 
 export function SerialsBrowser({ warehouses, initialProductId, initialQuery }: { warehouses: WarehouseDto[]; initialProductId: string | null; initialQuery: string }) {
@@ -36,7 +49,7 @@ export function SerialsBrowser({ warehouses, initialProductId, initialQuery }: {
   const [result, setResult] = useState<Page<SerialDto> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<(SerialDto & { history: HistoryRow[] }) | null>(null);
+  const [open, setOpen] = useState<SerialDetail | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -64,7 +77,7 @@ export function SerialsBrowser({ warehouses, initialProductId, initialQuery }: {
 
   async function show(s: SerialDto) {
     try {
-      setOpen((await api<{ data: SerialDto & { history: HistoryRow[] } }>(`/serials/${s.id}`)).data);
+      setOpen((await api<{ data: SerialDetail }>(`/serials/${s.id}`)).data);
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -109,7 +122,7 @@ export function SerialsBrowser({ warehouses, initialProductId, initialQuery }: {
                 </option>
               ))}
             </SelectField>
-            <SelectField label="Warehouse" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
+            <SelectField searchable label="Warehouse" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
               <option value="">Any</option>
               {warehouses.map((w) => (
                 <option key={w.id} value={w.id}>
@@ -133,6 +146,14 @@ export function SerialsBrowser({ warehouses, initialProductId, initialQuery }: {
             <p style={{ marginBottom: "var(--space-5)" }}>
               <Tag kind={STATUS_TAG[open.status] ?? "gray"}>{SERIAL_STATUS_LABEL[open.status] ?? open.status}</Tag> {where(open)}
             </p>
+            {open.cameIn ? (
+              <p className={styles.muted} style={{ marginBottom: "var(--space-5)" }}>
+                Came in on <Link href={`/stock/${open.cameIn.entry.id}`}>{open.cameIn.entry.number}</Link> · {open.cameIn.entryDate} · {open.cameIn.warehouseCode}
+                {open.cameIn.supplierName ? ` · ${open.cameIn.supplierName}` : ""}
+                {open.cameIn.boeNo ? ` · B/E ${open.cameIn.boeNo}` : ""}
+                {open.cameIn.countryOfOrigin ? ` · Origin ${open.cameIn.countryOfOrigin}` : ""}
+              </p>
+            ) : null}
             <ol className={styles.timeline}>
               {open.history.map((h) => (
                 <li key={h.id}>

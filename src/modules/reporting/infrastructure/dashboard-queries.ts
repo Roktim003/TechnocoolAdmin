@@ -172,6 +172,13 @@ export const dashboardQueries: DashboardQueries = {
       const rows = await db.stockEntry.findMany({ where: { createdById: userId, status: { not: "DRAFT" } }, orderBy: { updatedAt: "desc" }, take: limit, select: { id: true, number: true, draftRef: true, type: true, status: true, entryDate: true } });
       return rows.map((r) => ({ id: r.id, number: r.number ?? r.draftRef, typeLabel: ENTRY_TYPE_META[r.type as EntryType].label, status: r.status, date: r.entryDate.toISOString().slice(0, 10) }));
     }),
+
+  myEntryCounts: (userId, scope) =>
+    readOnly(async (db) => {
+      const rows = await db.stockEntry.groupBy({ by: ["status"], where: { createdById: userId, status: { in: ["DRAFT", "REJECTED"] }, warehouseId: { in: scope } }, _count: { _all: true } });
+      const of = (s: string) => rows.find((r) => r.status === s)?._count._all ?? 0;
+      return { drafts: of("DRAFT"), rejected: of("REJECTED") };
+    }),
 };
 
 const PREFIX = "dash:";

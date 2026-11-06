@@ -2,8 +2,8 @@ import { NotFoundError } from "@/shared/errors/app-error";
 import { authedRoute } from "@/shared/http/route";
 import { pageMeta } from "@/shared/pagination/list-query";
 import { UuidSchema } from "@/shared/validation/zod";
-import { NotificationListQuerySchema, UpdatePreferencesSchema } from "../application/dto";
-import type { NotificationRecord } from "../application/ports";
+import { NotificationListQuerySchema, RegisterPushDeviceSchema, UpdatePreferencesSchema } from "../application/dto";
+import type { NotificationRecord, PushDeviceRecord } from "../application/ports";
 import { notifications } from "./container";
 
 export const toNotificationDto = (n: NotificationRecord) => ({
@@ -34,5 +34,30 @@ export const notificationHandlers = {
   updatePreferences: authedRoute({}, async (ctx) => {
     const { preferences } = await ctx.body(UpdatePreferencesSchema);
     return { data: await notifications().service.updatePreferences(ctx.principal.userId, preferences) };
+  }),
+};
+
+export const toPushDeviceDto = (d: PushDeviceRecord) => ({
+  id: d.id,
+  platform: d.platform,
+  deviceName: d.deviceName,
+  appVersion: d.appVersion,
+  lastSeenAt: d.lastSeenAt.toISOString(),
+  createdAt: d.createdAt.toISOString(),
+});
+
+/** The mobile app registers its FCM token after sign-in and on every start; removes it on sign-out. Own devices only. */
+export const pushDeviceHandlers = {
+  list: authedRoute({}, async (ctx) => ({ data: (await notifications().devices.list(ctx.principal.userId)).map(toPushDeviceDto) })),
+  register: authedRoute({}, async (ctx) => {
+    const input = await ctx.body(RegisterPushDeviceSchema);
+    const { device, created } = await notifications().devices.register(ctx.principal.userId, input);
+    return { status: created ? 201 : 200, data: toPushDeviceDto(device) };
+  }),
+  remove: authedRoute<{ id: string }>({}, async (ctx) => {
+    const parsed = UuidSchema.safeParse(ctx.params.id);
+    if (!parsed.success) throw new NotFoundError("Push device");
+    await notifications().devices.remove(ctx.principal.userId, parsed.data);
+    return { status: 204 };
   }),
 };

@@ -245,7 +245,7 @@ Endpoints (under `/api/v1`, details in Swagger):
 - `stock-entries` (list with `type`, `status`, `warehouseId`, party, `productId`, dates, `awaitingMyApproval`, `awaitingMyReceipt`), `POST stock-entries` (`action: draft|submit|post`), `POST stock-entries/calculate`, `GET|PATCH stock-entries/:id`, `POST stock-entries/:id/{submit,post,approve,reject,cancel,reverse,receive}`.
 - Attachments: `GET|POST stock-entries/:id/attachments` (PDF / JPG / PNG / WebP by content, ≤ 10 MB, ≤ 20 per entry), `GET|DELETE stock-entries/:id/attachments/:attachmentId`. Import document files of a GRN · Imported use the same endpoints with a `docType` (see [Import documents](#import-documents-grn--imported)).
 - Documents: `POST stock-entries/:id/documents` (`kind` optional) queues a PDF (GRN, delivery challan, sales invoice, return / write-off / transfer / reversal note) that the **worker** renders with headless Chromium; poll `GET documents/:jobId`, download with `?download=1`.
-- Stock: `stock/balances`, `stock/products/:productId` (stock card + ledger), `stock/availability?productId&warehouseId`, `stock/movements`; `serials`, `serials/:id` (with history).
+- Stock: `stock/balances`, `stock/products/:productId` (stock card + ledger), `stock/availability?productId&warehouseId`, `stock/movements`; `serials`, `serials/:id` (with history and `cameIn`: the latest posted GRN / opening entry that brought it in, with supplier, B/E no. and date, BL no. and country of origin).
 - Masters: `customers` (suppliers: see Module 4; projects: see Module 5): list, create, get, update, `/:id/deactivate`. `inventory-settings`: GET / PATCH (FULL).
 
 UI: `/stock` (tabs New entry · Entries · Pending verification · Stock levels, plus a banner for transfers to receive), `/stock/:id` (details, timeline, approve / reject / reverse / receive, attachments, PDFs), `/stock/:id/edit`, `/stock/products/:productId` (stock card), `/stock/settings`, `/serials`, `/masters` (customers; `?tab=suppliers` redirects to `/purchases`, `?tab=projects` to `/projects`). The old `/inventory` address redirects to `/stock`.
@@ -279,7 +279,8 @@ Code: `src/modules/inventory` (opening import, counts, low stock — all stock c
 
 ### Notifications and low-stock alerts
 
-- In-app notifications for every event below; email too when the user's preference allows (`/settings/notifications`; defaults per type). Header bell: unread badge (polled every 60 s), latest 10, *Mark all as read*, full list at `/notifications`.
+- In-app notifications for every event below; email too when the user's preference allows, and a push to the user's phones (see *Push notifications* below) unless they turned push off for that type (`/settings/notifications`; email defaults per type, push on by default). Header bell: unread badge (polled every 60 s), latest 10, *Mark all as read*, full list at `/notifications`.
+- **Desktop pop-ups (web)**: while a StockBook tab is open, the bell polls every 30 s (also in the background) and shows a browser pop-up for each new notification when no StockBook tab has focus (more than 3 at once → one summary); clicking it marks it read and opens the link. The tab title shows the unread count, e.g. `(3) Dashboard · StockBook`. Per browser, opt-in from the bell panel (*Turn on pop-ups*) or `/settings/notifications`; kept in localStorage, nothing on the server (`src/lib/browser-popups.ts`). No service worker: closed tabs get nothing (use the mobile push for that). Needs HTTPS (or localhost).
 
 | Event | Recipients |
 |---|---|
@@ -294,7 +295,21 @@ Code: `src/modules/inventory` (opening import, counts, low stock — all stock c
 - **Low stock**: after each commit a queue job checks the touched products; when total *available* GOOD stock (on hand − reserved, all warehouses) crosses from ≥ minimum to < minimum, one alert fires; it re-arms once stock is back at or above the minimum (`LowStockState`). `/stock/low-stock` lists every product below its minimum with per-warehouse availability, short-by and suggested reorder (2 × minimum − available), filters and Excel export, and *Create PO* (see Module 4).
 - **Daily digest**: BullMQ repeatable job (default 09:00 Asia/Dhaka) emailing the full list to low-stock recipients who keep it on. Alert settings (inventory FULL, on `/stock/settings`): recipient roles, digest on/off and time.
 
-Endpoints: `stock-counts` (+ `/:id`, `/start`, `/lines/:lineId` (PUT), `/submit`, `/approve`, `/request-recount`, `/cancel`, `/variance`, `/sheet`), `opening-stock/template`, `opening-stock/imports` (+ `/:id`, `/:id/commit`), `opening-stock/warehouses`, `warehouses/:id/lock-opening|unlock-opening`, `stock/low-stock` (+ `/export`), `alert-settings`, `notifications` (+ `/unread-count`, `/:id/read`, `/read-all`), `notification-preferences`. Start / submit / approve / recount / cancel / commit need an `Idempotency-Key`.
+Endpoints: `stock-counts` (+ `/:id`, `/start`, `/lines/:lineId` (PUT), `/submit`, `/approve`, `/request-recount`, `/cancel`, `/variance`, `/sheet`), `opening-stock/template`, `opening-stock/imports` (+ `/:id`, `/:id/commit`), `opening-stock/warehouses`, `warehouses/:id/lock-opening|unlock-opening`, `stock/low-stock` (+ `/export`), `alert-settings`, `notifications` (+ `/unread-count`, `/:id/read`, `/read-all`), `notification-preferences`, `push-devices` (+ `/:id`). Start / submit / approve / recount / cancel / commit need an `Idempotency-Key`.
+
+### Push notifications (mobile app)
+
+Every in-app notification is also pushed to the recipient's phones through **Firebase Cloud Messaging** (HTTP v1; Android, and iOS through the APNs key in the Firebase project). Email-only types (the digests) are never pushed.
+
+- **Register:** after sign-in, on every app start and when Firebase rotates the token, the app sends `POST /push-devices {token, platform: ANDROID|IOS, deviceName?, appVersion?}` (201 new, 200 refreshed). A token is unique: when someone else signs in on that phone it moves to them. At most 10 phones per user (the least recently seen is dropped). `GET /push-devices` lists the caller's phones (never the token).
+- **Sign-out:** `DELETE /push-devices/:id` before `POST /auth/logout`, so the phone stops getting that user's pushes.
+- **Preferences:** `PATCH /notification-preferences {preferences: [{type, push: false}]}` turns push off per type; each item changes only the channels it gives (`email`, `push` or both). Disabled users get nothing.
+- **Payload:** title and body as in-app; `data.notificationId` (call `POST /notifications/:id/read` when opened), `data.type`, `data.link` (an app path such as `/stock/:id`, map it to a screen); iOS badge = unread count.
+- **Delivery:** `publish()` queues one job per phone on the `push` queue (4 attempts, exponential backoff from 5 s); only the worker talks to FCM. The token is read at send time, so a phone that signed out or moved in the meantime is skipped. Tokens FCM reports dead (`UNREGISTERED`, invalid, other sender) are deleted. Nothing is queued while push isn't configured.
+
+| Variable | Meaning |
+|---|---|
+| `FCM_SERVICE_ACCOUNT` | the Firebase service-account key file (Project settings → Service accounts → *Generate new private key*), pasted as JSON or base64-encoded. Set it on the app **and** the worker. Empty = push off. |
 
 ### Email (SMTP) setup
 
@@ -491,6 +506,7 @@ These rules apply in the API and in the export and email code, for every report,
 - **Layout**: a KPI row, a two-column chart grid (one column on phones), then lists. Every tile links to a report, or to the module screen when the user has no Reports access.
 - **KPIs**:
   - stock value (`seeCost`), low stock, waiting for **my** approval, open POs, overdue POs, running projects, transfers to receive
+  - creators who can't verify (inventory CREATE without APPROVE, i.e. Store Manager): **my drafts** and **my rejected entries** (their own entries in their warehouses), linking to `/stock?tab=entries&status=DRAFT|REJECTED&mine=1`
 - **Charts**:
   - stock value by brand (quantity without `seeCost`)
   - in vs out per day for 30 days

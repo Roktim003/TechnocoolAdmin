@@ -6,10 +6,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { SelectField, TextField } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
 import { Notification } from "@/components/ui/Notification";
 import { Pagination } from "@/components/ui/Pagination";
 import { Tag } from "@/components/ui/Tag";
 import { api, download, errorMessage, ApiError, type Page } from "@/lib/api-client";
+import { rules } from "@/lib/validation";
 import { formatMoney } from "@/shared/time/format";
 import { ProductThumb } from "./ProductThumb";
 import { STATUS_LABEL, type CatalogCaps, type CatalogDto, type CategoryDto, type ProductSummaryDto } from "./types";
@@ -39,6 +41,7 @@ export function CatalogBrowser({ caps, initialCatalogId, initialQuery }: Props) 
   const [adding, setAdding] = useState(false);
   const [newCatalog, setNewCatalog] = useState("");
   const [newCatalogError, setNewCatalogError] = useState<string | undefined>();
+  const [newCatalogAttempt, setNewCatalogAttempt] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const loadCatalogs = useCallback(async () => {
@@ -91,13 +94,24 @@ export function CatalogBrowser({ caps, initialCatalogId, initialQuery }: Props) 
     window.history.replaceState(null, "", url);
   }
 
+  // Catalog name: required, at most 60 characters (CreateCatalogSchema); re-checked live after the first attempt.
+  const newCatalogProblem = rules.required(newCatalog, "a name") ?? rules.maxLength(newCatalog, 60);
+  const shownNewCatalogError = newCatalogError ?? (newCatalogAttempt ? newCatalogProblem : undefined);
+
+  function closeAddCatalog() {
+    setAdding(false);
+    setNewCatalog("");
+    setNewCatalogError(undefined);
+    setNewCatalogAttempt(false);
+  }
+
   async function addCatalog() {
-    if (!newCatalog.trim()) return setNewCatalogError("Enter a name.");
+    setNewCatalogAttempt(true);
+    setNewCatalogError(undefined);
+    if (newCatalogProblem) return;
     try {
       const created = (await api<{ data: CatalogDto }>("/catalogs", { method: "POST", body: { name: newCatalog.trim() } })).data;
-      setAdding(false);
-      setNewCatalog("");
-      setNewCatalogError(undefined);
+      closeAddCatalog();
       await loadCatalogs();
       selectCatalog(created.id);
     } catch (err) {
@@ -168,25 +182,28 @@ export function CatalogBrowser({ caps, initialCatalogId, initialQuery }: Props) 
           adding ? (
             <form
               className={styles.cardForm}
+              noValidate
               onSubmit={(e) => {
                 e.preventDefault();
                 void addCatalog();
               }}
             >
-              <TextField label="Catalog name" value={newCatalog} onChange={(e) => setNewCatalog(e.target.value)} error={newCatalogError} placeholder="e.g. Gree" autoFocus />
+              <TextField
+                label="Catalog name"
+                value={newCatalog}
+                onChange={(e) => {
+                  setNewCatalog(e.target.value);
+                  setNewCatalogError(undefined);
+                }}
+                error={shownNewCatalogError}
+                placeholder="e.g. Gree"
+                autoFocus
+              />
               <div className={styles.cardFormActions}>
                 <Button type="submit" size="sm">
                   Add
                 </Button>
-                <Button
-                  kind="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setAdding(false);
-                    setNewCatalog("");
-                    setNewCatalogError(undefined);
-                  }}
-                >
+                <Button kind="ghost" size="sm" onClick={closeAddCatalog}>
                   Cancel
                 </Button>
               </div>
@@ -211,7 +228,7 @@ export function CatalogBrowser({ caps, initialCatalogId, initialQuery }: Props) 
         toolbar={
           <div className={styles.toolbar}>
             <TextField label="Search" type="search" placeholder="Name, code, model or barcode" value={q} onChange={(e) => setQ(e.target.value)} fieldClassName={styles.search} />
-            <SelectField
+            <SelectField searchable
               label="Category"
               value={categoryId}
               onChange={(e) => {
@@ -261,7 +278,8 @@ export function CatalogBrowser({ caps, initialCatalogId, initialQuery }: Props) 
                 <Link href="/catalog/import" className={styles.secondaryLink}>
                   Import
                 </Link>
-                <Link href="/catalog/settings" className={styles.secondaryLink}>
+                <Link href="/catalog/settings" className={`${styles.secondaryLink} ${styles.settingsLink}`} title="Catalogs (brands), categories and units: add, rename, deactivate or delete">
+                  <Icon name="settings" size={14} />
                   Settings
                 </Link>
               </div>

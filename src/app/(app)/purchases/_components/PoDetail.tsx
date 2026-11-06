@@ -2,20 +2,26 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "@/components/ui/Button";
 import { Checkbox, TextAreaField, TextField } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, errorMessage, upload } from "@/lib/api-client";
+import { collect, revealProblems, rules, sanitize, type Problems } from "@/lib/validation";
+import { PdfViewer, type PdfRequest } from "@/components/ui/PdfViewer";
+import { waitForDocument } from "@/lib/documents";
 import { formatDateTime, formatMoney } from "@/shared/time/format";
 import { ProductPicker } from "../../stock/_components/ProductPicker";
 import { formatAmount, formatQty, newKey, STATUS_LABEL, STATUS_TAG, type ProductOption } from "../../stock/_components/types";
+import { price4 } from "./PoForm";
 import { Progress } from "./Progress";
 import { PO_STATUS_LABEL, PO_STATUS_TAG, type PoDetailDto, type PurchasesCaps } from "./types";
 import styles from "../../stock/_components/stock.module.css";
 import p from "./purchases.module.css";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 
 const SAVED: Record<string, string> = {
   draft: "Draft saved.",
@@ -39,10 +45,41 @@ const bytes = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 10
 const trimZeros = (v: string) => (v.includes(".") ? v.replace(/\.?0+$/, "") : v);
 const pretty = (event: string) => event.charAt(0) + event.slice(1).toLowerCase();
 
+/** Quantities (3 decimals) as exact integer thousandths, for comparisons without floats. */
+const milli = (v: string) => {
+  const [i = "0", f = ""] = v.trim().split(".");
+  return BigInt(`${i || "0"}${f.padEnd(3, "0").slice(0, 3)}`);
+};
+const fromMilli = (n: bigint) => {
+  const s = n.toString().padStart(4, "0");
+  return trimZeros(`${s.slice(0, -3)}.${s.slice(-3)}`);
+};
+
+/** Same as the server's PoReasonSchema / AmendPoSchema reason: 3–500 characters. */
+const reasonRule = (v: string) => rules.required(v, "a reason") ?? (v.trim().length < 3 ? "Give a reason (at least 3 characters)." : rules.maxLength(v, 500));
+
+// Same limits as the server (inventory attachment service): PDF / JPG / PNG / WebP, 10 MB each, 20 per PO.
+const FILE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+const FILE_MAX_BYTES = 10 * 1024 * 1024;
+const MAX_FILES = 20;
+
+const LABELS: Record<string, string> = {
+  reason: "Reason",
+  to: "To",
+  cc: "Cc",
+  message: "Message",
+  expectedDeliveryDate: "Expected delivery",
+  exchangeRate: "Exchange rate",
+  lines: "Products",
+};
+const LINE_FIELD: Record<string, string> = { product: "product", qty: "quantity", unitPrice: "unit price" };
+
 export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initial: PoDetailDto; saved: string | null }) {
   const router = useRouter();
   const [po, setPo] = useState(initial);
   const [notice, setNotice] = useState<{ kind: "success" | "error" | "warning" | "info"; title?: string; message: string } | null>(saved && SAVED[saved] ? { kind: "success", message: SAVED[saved] } : null);
+  const [pdfReq, setPdfReq] = useState<PdfRequest | null>(null);
+  const closePdf = useCallback(() => setPdfReq(null), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalKind>(null);
   const [reason, setReason] = useState("");
@@ -56,6 +93,17 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
   const [amendRate, setAmendRate] = useState("");
   const keyRef = useRef(newKey());
   const fileInput = useRef<HTMLInputElement>(null);
+  // Set once the user tries to submit the open modal: from then on it checks itself live.
+  const [attempted, setAttempted] = useState(false);
+  // The open modal's content (its parent is the modal's scrolling body).
+  const modalTop = useRef<HTMLDivElement>(null);
+
+  useEffect(() => setAttempted(false), [modal]);
+
+  // Server field errors describe what was sent: drop them once the user edits the modal.
+  useEffect(() => {
+    setFieldErrors((e) => (Object.keys(e).length ? {} : e));
+  }, [reason, to, cc, message, emailSupplier, amendLines, amendDate, amendRate]);
 
   useEffect(() => {
     if (saved) {
@@ -82,8 +130,10 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
       setReason("");
       router.refresh();
     } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fieldErrors()).length && modal) setFieldErrors(err.fieldErrors());
-      else {
+      if (err instanceof ApiError && Object.keys(err.fieldErrors()).length && modal) {
+        setFieldErrors(action === "amend" ? mapAmendErrors(err.fieldErrors()) : err.fieldErrors());
+        revealProblems(modalTop.current?.parentElement);
+      } else {
         setModal(null);
         setNotice({ kind: "error", title: "That didn't work", message: errorMessage(err) });
       }
@@ -97,12 +147,14 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
     setBusy("email");
     setFieldErrors({});
     try {
-      const r = await api<{ data: { to: string } }>(`/purchase-orders/${po.id}/email`, { method: "POST", body: { to: to || undefined, cc: cc || undefined, message: message || null }, headers: { "Idempotency-Key": keyRef.current } });
+      const r = await api<{ data: { to: string } }>(`/purchase-orders/${po.id}/email`, { method: "POST", body: { to: to.trim() || undefined, cc: cc.trim() || undefined, message: message.trim() || null }, headers: { "Idempotency-Key": keyRef.current } });
       setNotice({ kind: "success", message: `The PO PDF is being emailed to ${r.data.to}.` });
       setModal(null);
     } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fieldErrors()).length) setFieldErrors(err.fieldErrors());
-      else {
+      if (err instanceof ApiError && Object.keys(err.fieldErrors()).length) {
+        setFieldErrors(err.fieldErrors());
+        revealProblems(modalTop.current?.parentElement);
+      } else {
         setModal(null);
         setNotice({ kind: "error", title: "Couldn't send the email", message: errorMessage(err) });
       }
@@ -112,29 +164,30 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
     }
   }
 
-  async function pdf() {
-    setBusy("pdf");
-    try {
-      const job = (await api<{ data: { jobId: string } }>(`/purchase-orders/${po.id}/documents`, { method: "POST", body: {} })).data;
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 800));
-        const s = (await api<{ data: { status: string; downloadUrl: string | null; failedReason: string | null } }>(`/documents/${job.jobId}`)).data;
-        if (s.status === "completed" && s.downloadUrl) {
-          window.open(s.downloadUrl, "_blank", "noopener");
-          return;
-        }
-        if (s.status === "failed") throw new Error(s.failedReason ?? "The PDF couldn't be created.");
-      }
-      throw new Error("The PDF is taking too long. Try again in a minute.");
-    } catch (err) {
-      setNotice({ kind: "error", title: "Couldn't create the PDF", message: errorMessage(err) });
-    } finally {
-      setBusy(null);
-    }
+  /** Opens the PDF viewer; it shows a loader while the worker renders the document. */
+  function pdf() {
+    setPdfReq({
+      title: "Purchase order",
+      subtitle: po.displayNumber,
+      load: async (signal) => {
+        const job = (await api<{ data: { jobId: string } }>(`/purchase-orders/${po.id}/documents`, { method: "POST", body: {} })).data;
+        return waitForDocument(job.jobId, `${po.displayNumber}.pdf`, signal);
+      },
+    });
   }
 
   async function addFiles(files: FileList | null) {
     if (!files?.length) return;
+    // Checked here first (the server checks again) so every unsuitable file is named at once.
+    const bad = Array.from(files).flatMap((f) =>
+      f.type && !FILE_TYPES.includes(f.type) ? [`${f.name}: use a PDF, JPG, PNG or WebP file.`] : f.size > FILE_MAX_BYTES ? [`${f.name}: larger than 10 MB.`] : [],
+    );
+    if (po.attachments.length + files.length > MAX_FILES) bad.push(`A PO can have at most ${MAX_FILES} files (${po.attachments.length} attached).`);
+    if (bad.length) {
+      setNotice({ kind: "error", title: "Can't upload", message: bad.join(" ") });
+      if (fileInput.current) fileInput.current.value = "";
+      return;
+    }
     const fd = new FormData();
     for (const f of Array.from(files)) fd.append("file", f);
     setBusy("upload");
@@ -151,7 +204,7 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
   }
 
   async function removeFile(a: PoDetailDto["attachments"][number]) {
-    if (!window.confirm(`Remove ${a.fileName}?`)) return;
+    if (!(await confirmDialog({ title: `Remove ${a.fileName}?`, message: "The file is removed from this purchase order. This can't be undone.", confirmText: "Remove file", danger: true }))) return;
     try {
       await api(`/purchase-orders/${po.id}/attachments/${a.id}`, { method: "DELETE" });
       setPo((x) => ({ ...x, attachments: x.attachments.filter((y) => y.id !== a.id) }));
@@ -168,7 +221,7 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
         product: { id: l.product.id, code: l.product.code, name: l.product.name, model: null, unit: { code: l.product.unitCode }, sellingPrice: "", trackSerial: l.product.trackSerial, status: l.product.status },
         qty: trimZeros(l.qty),
         unitPrice: l.unitPrice ? trimZeros(l.unitPrice) : "",
-        min: (Number(l.receivedQty) + Number(l.pendingReceiptQty)).toString(),
+        min: fromMilli(milli(l.receivedQty) + milli(l.pendingReceiptQty)),
         note: l.note,
       })),
     );
@@ -187,6 +240,83 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
       ...(caps.seeCost ? { lines: amendLines.filter((l) => l.product).map((l) => ({ ...(l.id ? { id: l.id } : {}), productId: l.product!.id, qty: l.qty || "0", unitPrice: l.unitPrice || "0", note: l.note })) } : {}),
     };
   }
+
+  /** Amend: same rules as the server (AmendPoSchema + the amend checks); lines only for roles that see costs. */
+  function amendProblems(): Problems {
+    const out = collect(
+      ["expectedDeliveryDate", rules.notBefore(amendDate, po.poDate, "Expected delivery can't be before the PO date.")],
+      ["exchangeRate", po.type === "LOCAL" ? undefined : price4(amendRate, true)],
+    );
+    if (caps.seeCost) {
+      const firstLine = new Map<string, number>();
+      amendLines.forEach((l, i) => {
+        const k = (f: string) => `line:${l.key}:${f}`;
+        if (!l.product) {
+          if (l.qty.trim() || l.unitPrice.trim()) out[k("product")] = "Choose a product, or remove the line.";
+          return;
+        }
+        const seen = firstLine.get(l.product.id);
+        if (seen !== undefined) out[k("product")] = `Already on line ${seen + 1}. Use one line with the total quantity.`;
+        else firstLine.set(l.product.id, i);
+        const qty = rules.required(l.qty, "a quantity") ?? rules.qty(l.qty, { positive: true }) ?? (milli(l.qty) < milli(l.min) ? `Can't go below ${formatQty(l.min)} (already received or pending).` : undefined);
+        if (qty) out[k("qty")] = qty;
+        const price = price4(l.unitPrice, true) ?? (!l.unitPrice.trim() ? "Enter a unit price greater than 0." : undefined);
+        if (price) out[k("unitPrice")] = price;
+      });
+      if (!amendLines.some((l) => l.product)) out.lines = "Keep at least one product.";
+    }
+    const r = reasonRule(reason);
+    if (r) out.reason = r;
+    return out;
+  }
+
+  /** Server paths `lines.<n>.<field>` count only amend lines with a product; map them to the rows on screen. */
+  function mapAmendErrors(fieldErrors: Record<string, string>): Record<string, string> {
+    const sent = amendLines.filter((l) => l.product);
+    const out: Record<string, string> = {};
+    for (const [path, msg] of Object.entries(fieldErrors)) {
+      const m = /^lines\.(\d+)(?:\.(\w+))?/.exec(path);
+      const line = m ? sent[Number(m[1])] : undefined;
+      if (line) out[`line:${line.key}:${m![2] === "qty" || m![2] === "unitPrice" ? m![2] : "product"}`] = msg;
+      else out[path] = msg;
+    }
+    return out;
+  }
+
+  /** "To" may be left empty when the supplier has an email on file (the server uses it). */
+  const toRule = () => rules.email(to) ?? (!to.trim() && !po.supplier.email ? "Enter the supplier's email address." : undefined);
+
+  function modalProblems(kind: ModalKind): Problems {
+    switch (kind) {
+      case "reject":
+      case "close":
+      case "cancel":
+        return collect(["reason", reasonRule(reason)]);
+      case "sent":
+        return emailSupplier ? collect(["to", toRule()], ["message", rules.maxLength(message, 2000)]) : {};
+      case "email":
+        return collect(["to", toRule()], ["cc", rules.email(cc)], ["message", rules.maxLength(message, 2000)]);
+      case "amend":
+        return amendProblems();
+      default:
+        return {};
+    }
+  }
+
+  /** Checks the open modal in the browser first and shows every problem at once. */
+  function submitModal(run: () => unknown) {
+    setAttempted(true);
+    if (Object.keys(modalProblems(modal)).length) return revealProblems(modalTop.current?.parentElement);
+    void run();
+  }
+
+  const problems = attempted ? modalProblems(modal) : {};
+  const shown: Record<string, string> = { ...fieldErrors, ...problems };
+  const amendLabels: Record<string, string> = { ...LABELS, reason: "Reason for the amendment" };
+  amendLines.forEach((l, i) => {
+    for (const [f, name] of Object.entries(LINE_FIELD)) amendLabels[`line:${l.key}:${f}`] = `Line ${i + 1} ${name}`;
+  });
+  const lineError = (l: AmendLine, f: string) => shown[`line:${l.key}:${f}`];
 
   const x = po.actions;
   const local = po.type === "LOCAL";
@@ -249,10 +379,11 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
             </Button>
           ) : null}
           {x.pdf ? (
-            <Button kind="secondary" onClick={pdf} disabled={busy === "pdf"}>
-              {busy === "pdf" ? "Preparing PDF…" : "PDF"}
+            <Button kind="secondary" onClick={pdf} disabled={!!pdfReq}>
+              PDF
             </Button>
           ) : null}
+          <PdfViewer request={pdfReq} onClose={closePdf} />
           {x.amend ? (
             <Button kind="secondary" onClick={openAmend} disabled={!!busy}>
               Amend
@@ -264,7 +395,7 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
             </Button>
           ) : null}
           {x.cancel ? (
-            <Button kind="ghost" onClick={() => (setReason(""), setModal("cancel"))} disabled={!!busy}>
+            <Button kind="danger" onClick={() => (setReason(""), setModal("cancel"))} disabled={!!busy}>
               Cancel PO
             </Button>
           ) : null}
@@ -524,10 +655,12 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
         primary="Reject"
         reason={reason}
         setReason={setReason}
-        error={fieldErrors.reason}
+        error={shown.reason}
+        problems={problems}
+        topRef={modalTop}
         busy={busy === "reject"}
         onClose={close}
-        onSubmit={() => act("reject", { reason }, "Rejected. The creator was notified.")}
+        onSubmit={() => submitModal(() => act("reject", { reason }, "Rejected. The creator was notified."))}
       />
       <ReasonModal
         open={modal === "close"}
@@ -537,10 +670,12 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
         primary="Close PO"
         reason={reason}
         setReason={setReason}
-        error={fieldErrors.reason}
+        error={shown.reason}
+        problems={problems}
+        topRef={modalTop}
         busy={busy === "close"}
         onClose={close}
-        onSubmit={() => act("close", { reason }, "Closed.")}
+        onSubmit={() => submitModal(() => act("close", { reason }, "Closed."))}
       />
       <ReasonModal
         open={modal === "cancel"}
@@ -550,10 +685,12 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
         primary="Cancel PO"
         reason={reason}
         setReason={setReason}
-        error={fieldErrors.reason}
+        error={shown.reason}
+        problems={problems}
+        topRef={modalTop}
         busy={busy === "cancel"}
         onClose={close}
-        onSubmit={() => act("cancel", { reason }, "Cancelled.")}
+        onSubmit={() => submitModal(() => act("cancel", { reason }, "Cancelled."))}
       />
 
       <Modal
@@ -563,31 +700,34 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
         primaryText={emailSupplier ? "Mark sent & email" : "Mark sent"}
         submitting={busy === "mark-sent"}
         onClose={close}
-        onSubmit={() => act("mark-sent", emailSupplier ? { emailSupplier: true, to: to || undefined, message: message || null } : {}, "Marked as sent.")}
+        onSubmit={() => submitModal(() => act("mark-sent", emailSupplier ? { emailSupplier: true, to: to.trim() || undefined, message: message.trim() || null } : {}, "Marked as sent."))}
       >
-        <div className={styles.stack}>
+        <div ref={modalTop} className={styles.stack}>
+          <FormProblems problems={problems} labels={LABELS} />
           <Checkbox label="Also email the PO PDF to the supplier" checked={emailSupplier} onChange={(e) => setEmailSupplier(e.target.checked)} />
           {emailSupplier ? (
             <>
-              <TextField label="To" type="email" value={to} onChange={(e) => setTo(e.target.value)} error={fieldErrors.to} helper={po.supplier.email ? undefined : "The supplier has no email on file."} />
-              <TextAreaField label="Message (optional)" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} error={fieldErrors.message} />
+              <TextField label="To" type="email" placeholder="name@company.com" value={to} onChange={(e) => setTo(e.target.value)} error={shown.to} helper={po.supplier.email ? undefined : "The supplier has no email on file."} />
+              <TextAreaField label="Message (optional)" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} error={shown.message} />
             </>
           ) : null}
         </div>
       </Modal>
 
-      <Modal open={modal === "email"} title="Email PO to supplier" label={po.displayNumber} primaryText="Send" submitting={busy === "email"} onClose={close} onSubmit={() => void sendEmail()}>
-        <div className={styles.stack}>
-          <TextField label="To" type="email" value={to} onChange={(e) => setTo(e.target.value)} error={fieldErrors.to} />
-          <TextField label="Cc (optional)" type="email" value={cc} onChange={(e) => setCc(e.target.value)} error={fieldErrors.cc} />
-          <TextAreaField label="Message (optional)" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} error={fieldErrors.message} helper="The PO PDF is attached." />
+      <Modal open={modal === "email"} title="Email PO to supplier" label={po.displayNumber} primaryText="Send" submitting={busy === "email"} onClose={close} onSubmit={() => submitModal(sendEmail)}>
+        <div ref={modalTop} className={styles.stack}>
+          <FormProblems problems={problems} labels={LABELS} />
+          <TextField label="To" type="email" placeholder="name@company.com" value={to} onChange={(e) => setTo(e.target.value)} error={shown.to} helper={po.supplier.email ? undefined : "The supplier has no email on file."} />
+          <TextField label="Cc (optional)" type="email" placeholder="name@company.com" value={cc} onChange={(e) => setCc(e.target.value)} error={shown.cc} />
+          <TextAreaField label="Message (optional)" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} error={shown.message} helper="The PO PDF is attached." />
         </div>
       </Modal>
 
-      <Modal open={modal === "amend"} title="Amend purchase order" label={po.displayNumber} primaryText="Save amendment" submitting={busy === "amend"} onClose={close} onSubmit={() => act("amend", amendBody(), "Amended. The previous version is kept as a revision.")}>
-        <div className={styles.stack}>
+      <Modal open={modal === "amend"} title="Amend purchase order" label={po.displayNumber} primaryText="Save amendment" submitting={busy === "amend"} onClose={close} onSubmit={() => submitModal(() => act("amend", amendBody(), "Amended. The previous version is kept as a revision."))}>
+        <div ref={modalTop} className={styles.stack}>
+          <FormProblems problems={problems} labels={amendLabels} />
           <p className={styles.muted}>A line can&apos;t go below what was already received or is pending on a GRN. The PO keeps its number; the old version is saved as a revision.</p>
-          {fieldErrors.lines ? <Notification kind="error">{fieldErrors.lines}</Notification> : null}
+          {shown.lines ? <Notification kind="error">{shown.lines}</Notification> : null}
           {caps.seeCost ? (
             <div className={styles.linesWrap}>
               <table className={styles.lines}>
@@ -612,15 +752,34 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
                               <span className={styles.mono}>{l.product?.code}</span> {l.product?.name}
                             </>
                           ) : (
-                            <ProductPicker value={l.product} onChange={(prod) => upd({ product: prod })} />
+                            <ProductPicker value={l.product} onChange={(prod) => upd({ product: prod })} invalid={!!lineError(l, "product")} />
                           )}
+                          {lineError(l, "product") ? <div className={styles.lineWarn}>{lineError(l, "product")}</div> : null}
                           {Number(l.min) ? <div className={styles.lineMeta}>At least {formatQty(l.min)} (received + pending)</div> : null}
                         </td>
                         <td className={styles.right}>
-                          <input className={styles.cellInput} inputMode="decimal" aria-label={`Quantity, line ${i + 1}`} value={l.qty} onChange={(e) => upd({ qty: e.target.value })} />
+                          <input
+                            className={`${styles.cellInput} ${lineError(l, "qty") ? styles.cellInputError : ""}`}
+                            inputMode="decimal"
+                            autoComplete="off"
+                            aria-label={`Quantity, line ${i + 1}`}
+                            aria-invalid={lineError(l, "qty") ? true : undefined}
+                            value={l.qty}
+                            onChange={(e) => upd({ qty: sanitize("qty", e.target.value) })}
+                          />
+                          {lineError(l, "qty") ? <div className={styles.lineWarn}>{lineError(l, "qty")}</div> : null}
                         </td>
                         <td className={styles.right}>
-                          <input className={styles.cellInput} inputMode="decimal" aria-label={`Unit price, line ${i + 1}`} value={l.unitPrice} onChange={(e) => upd({ unitPrice: e.target.value })} />
+                          <input
+                            className={`${styles.cellInput} ${lineError(l, "unitPrice") ? styles.cellInputError : ""}`}
+                            inputMode="decimal"
+                            autoComplete="off"
+                            aria-label={`Unit price, line ${i + 1}`}
+                            aria-invalid={lineError(l, "unitPrice") ? true : undefined}
+                            value={l.unitPrice}
+                            onChange={(e) => upd({ unitPrice: sanitize("rate", e.target.value) })}
+                          />
+                          {lineError(l, "unitPrice") ? <div className={styles.lineWarn}>{lineError(l, "unitPrice")}</div> : null}
                         </td>
                         <td>
                           {Number(l.min) ? null : (
@@ -644,21 +803,38 @@ export function PoDetail({ caps, initial, saved }: { caps: PurchasesCaps; initia
             <p className={styles.muted}>Quantities and prices can be amended by roles that can see costs. You can change the expected delivery date.</p>
           )}
           <div className={styles.grid}>
-            <TextField label="Expected delivery" type="date" value={amendDate} onChange={(e) => setAmendDate(e.target.value)} error={fieldErrors.expectedDeliveryDate} />
-            {!local ? <TextField label={`Exchange rate (৳ per ${po.currency})`} inputMode="decimal" value={amendRate} onChange={(e) => setAmendRate(e.target.value)} error={fieldErrors.exchangeRate} /> : null}
+            <TextField label="Expected delivery" type="date" min={po.poDate} value={amendDate} onChange={(e) => setAmendDate(e.target.value)} error={shown.expectedDeliveryDate} />
+            {!local ? <TextField label={`Exchange rate (৳ per ${po.currency})`} kind="rate" value={amendRate} onChange={(e) => setAmendRate(e.target.value)} error={shown.exchangeRate} helper="Leave empty to keep the current rate." /> : null}
           </div>
-          <TextAreaField label="Reason for the amendment" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} error={fieldErrors.reason} required />
+          <TextAreaField label="Reason for the amendment" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} error={shown.reason} required />
         </div>
       </Modal>
     </>
   );
 }
 
-function ReasonModal(props: { open: boolean; title: string; label: string; text: string; primary: string; reason: string; setReason: (v: string) => void; error?: string; busy: boolean; onClose: () => void; onSubmit: () => void }) {
+function ReasonModal(props: {
+  open: boolean;
+  title: string;
+  label: string;
+  text: string;
+  primary: string;
+  reason: string;
+  setReason: (v: string) => void;
+  error?: string;
+  problems: Problems;
+  topRef: RefObject<HTMLDivElement | null>;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
   return (
     <Modal open={props.open} title={props.title} label={props.label} primaryText={props.primary} primaryKind="danger" submitting={props.busy} onClose={props.onClose} onSubmit={props.onSubmit}>
-      <p style={{ marginBottom: "var(--space-5)" }}>{props.text}</p>
-      <TextAreaField label="Reason" rows={3} value={props.reason} onChange={(e) => props.setReason(e.target.value)} error={props.error} required />
+      <div ref={props.topRef} className={styles.stack}>
+        <FormProblems problems={props.problems} labels={LABELS} />
+        <p style={{ margin: 0 }}>{props.text}</p>
+        <TextAreaField label="Reason" rows={3} value={props.reason} onChange={(e) => props.setReason(e.target.value)} error={props.error} helper="At least 3 characters." required />
+      </div>
     </Modal>
   );
 }

@@ -1,14 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Checkbox, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Pagination } from "@/components/ui/Pagination";
 import { SkeletonLines, SkeletonTableRows } from "@/components/ui/Skeleton";
 import { Tag } from "@/components/ui/Tag";
-import { api, ApiError, download, errorMessage, type Page } from "@/lib/api-client";
+import { PdfViewer, type PdfRequest } from "@/components/ui/PdfViewer";
+import { api, ApiError, errorMessage, type Page } from "@/lib/api-client";
+import { collect, revealProblems, rules } from "@/lib/validation";
 import { WEEKDAYS } from "@/modules/reporting/domain/schedule";
 import { FilterFields } from "./FilterFields";
 import { cleanFilters, FORMAT_LABEL, formatDhaka, withDefaults, type Lookups, type ReportInfo, type ReportsCaps, type RunDto, type ScheduleDto } from "./types";
@@ -26,6 +29,19 @@ interface FormState {
   recipientUserIds: string[];
   externalEmails: string;
 }
+
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+const LABELS: Record<string, string> = {
+  reportId: "Report",
+  params: "Filters",
+  frequency: "How often",
+  dayOfWeek: "Day",
+  dayOfMonth: "Day",
+  time: "Time",
+  format: "Format",
+  recipientUserIds: "Recipients",
+  externalEmails: "External email addresses",
+};
 
 const STATUS_TAG = { SUCCESS: { kind: "green", label: "Sent" }, FAILED: { kind: "red", label: "Failed" }, RUNNING: { kind: "blue", label: "Running" } } as const;
 const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th"}`;
@@ -55,6 +71,8 @@ export function SchedulesPanel({
   const [form, setForm] = useState<FormState | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<ScheduleDto | null>(null);
   const [deleting, setDeleting] = useState<ScheduleDto | null>(null);
@@ -88,12 +106,21 @@ export function SchedulesPanel({
   useEffect(() => {
     if (prefill && catalog.length) {
       setForm(blank(prefill.reportId, prefill.params));
+      setAttempt(false);
+      setFormError(null);
       onPrefillUsed();
     }
   }, [prefill, catalog, blank, onPrefillUsed]);
 
+  /** Opens (or closes, with null) the schedule form; each form starts without errors. */
+  const openForm = (f: FormState | null) => {
+    setForm(f);
+    setAttempt(false);
+    setFormError(null);
+  };
+
   const edit = (s: ScheduleDto) =>
-    setForm({
+    openForm({
       id: s.id,
       reportId: s.reportId,
       params: { ...s.params },
@@ -106,11 +133,32 @@ export function SchedulesPanel({
       externalEmails: s.externalEmails.join(", "),
     });
 
+  // Browser-side checks (same rules as the server); every problem is shown at once.
+  const emailList = (form?.externalEmails ?? "")
+    .split(/[,;\s]+/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const badEmail = emailList.find((e) => rules.email(e));
+  const problems = form
+    ? collect(
+        ["reportId", rules.chosen(form.reportId, "a report")],
+        ["time", rules.required(form.time, "the time") ?? (TIME.test(form.time) ? undefined : "Use HH:mm (24-hour), e.g. 09:00.")],
+        ["recipientUserIds", form.recipientUserIds.length > 50 ? "Choose at most 50 users." : !form.recipientUserIds.length && !(caps.isFull && emailList.length) ? "Tick at least one recipient." : undefined],
+        ["externalEmails", !caps.isFull ? undefined : badEmail ? `“${badEmail}” isn't a valid email address, e.g. name@company.com.` : emailList.length > 20 ? "Enter at most 20 email addresses." : undefined],
+      )
+    : {};
+  const shownErrors = { ...formErrors, ...(attempt ? problems : {}) };
+
+  // Server errors on fields disappear once the form is edited.
+  useEffect(() => setFormErrors({}), [form]);
+
   async function save() {
     if (!form) return;
+    setAttempt(true);
+    setFormError(null);
+    if (Object.keys(problems).length) return revealProblems(formRef.current?.parentElement);
     setSaving(true);
     setFormErrors({});
-    setFormError(null);
     const report = catalog.find((r) => r.id === form.reportId);
     const body = {
       reportId: form.reportId,
@@ -121,24 +169,20 @@ export function SchedulesPanel({
       time: form.time,
       format: form.format,
       recipientUserIds: form.recipientUserIds,
-      externalEmails: caps.isFull
-        ? form.externalEmails
-            .split(/[,;\s]+/)
-            .map((e) => e.trim())
-            .filter(Boolean)
-        : [],
+      externalEmails: caps.isFull ? emailList : [],
     };
     try {
       if (form.id) await api(`/report-schedules/${form.id}`, { method: "PATCH", body });
       else await api("/report-schedules", { method: "POST", body, headers: { "Idempotency-Key": newKey() } });
       setNotice(form.id ? "Schedule saved." : "Schedule created. The first email goes out at the next run.");
-      setForm(null);
+      openForm(null);
       await load();
     } catch (err) {
-      if (err instanceof ApiError) {
-        setFormErrors(Object.fromEntries(Object.entries(err.fieldErrors()).map(([k, v]) => [k.split(".")[0]!, v])));
-        setFormError(err.message);
-      } else setFormError(errorMessage(err));
+      const fields = err instanceof ApiError ? Object.fromEntries(Object.entries(err.fieldErrors()).map(([k, v]) => [k.split(".")[0]!, v])) : {};
+      setFormErrors(fields);
+      // Field problems are marked on the fields; only say something general when there are none.
+      setFormError(Object.keys(fields).length ? "Some details need fixing. The fields are marked in red below." : errorMessage(err));
+      revealProblems(formRef.current?.parentElement);
     } finally {
       setSaving(false);
     }
@@ -179,7 +223,7 @@ export function SchedulesPanel({
             {caps.isFull ? " You manage everyone’s schedules." : " You see the schedules you own."}
           </p>
         </div>
-        <Button onClick={() => setForm(blank(catalog[0]?.id ?? ""))} disabled={!catalog.length}>
+        <Button onClick={() => openForm(blank(catalog[0]?.id ?? ""))} disabled={!catalog.length}>
           New schedule
         </Button>
       </div>
@@ -277,11 +321,16 @@ export function SchedulesPanel({
         ) : null}
       </div>
 
-      <Modal open={!!form} title={form?.id ? "Edit scheduled email" : "New scheduled email"} label="Reports" onClose={() => setForm(null)} onSubmit={(e) => (e.preventDefault(), void save())} submitting={saving} primaryText={form?.id ? "Save" : "Create schedule"}>
+      <Modal open={!!form} title={form?.id ? "Edit scheduled email" : "New scheduled email"} label="Reports" onClose={() => openForm(null)} onSubmit={(e) => (e.preventDefault(), void save())} submitting={saving} primaryText={form?.id ? "Save" : "Create schedule"}>
         {form ? (
-          <div className={styles.form}>
-            {formError ? <Notification kind="error">{formError}</Notification> : null}
-            <SelectField label="Report" value={form.reportId} error={formErrors.reportId} onChange={(e) => setForm({ ...form, reportId: e.target.value, params: withDefaults(catalog.find((r) => r.id === e.target.value)?.params ?? [], {}) })}>
+          <div ref={formRef} className={styles.form}>
+            {attempt ? <FormProblems problems={problems} labels={LABELS} /> : null}
+            {formError ? (
+              <Notification kind="error" onClose={() => setFormError(null)}>
+                {formError}
+              </Notification>
+            ) : null}
+            <SelectField searchable label="Report" value={form.reportId} error={shownErrors.reportId} onChange={(e) => setForm({ ...form, reportId: e.target.value, params: withDefaults(catalog.find((r) => r.id === e.target.value)?.params ?? [], {}) })}>
               {catalog.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.number}. {r.title}
@@ -294,17 +343,17 @@ export function SchedulesPanel({
                 <div className={styles.filters}>
                   <FilterFields params={formReport.params} values={form.params} lookups={lookups} onChange={(k, v) => setForm({ ...form, params: { ...form.params, [k]: v } })} />
                 </div>
-                {formErrors.params ? <p className={styles.fieldError}>{formErrors.params}</p> : null}
+                {shownErrors.params ? <p className={styles.fieldError}>{shownErrors.params}</p> : null}
               </fieldset>
             ) : null}
             <div className={styles.formRow}>
-              <SelectField label="How often" value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value as FormState["frequency"] })}>
+              <SelectField label="How often" value={form.frequency} error={shownErrors.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value as FormState["frequency"] })}>
                 <option value="DAILY">Daily</option>
                 <option value="WEEKLY">Weekly</option>
                 <option value="MONTHLY">Monthly</option>
               </SelectField>
               {form.frequency === "WEEKLY" ? (
-                <SelectField label="Day" value={form.dayOfWeek} error={formErrors.dayOfWeek} onChange={(e) => setForm({ ...form, dayOfWeek: e.target.value })}>
+                <SelectField label="Day" value={form.dayOfWeek} error={shownErrors.dayOfWeek} onChange={(e) => setForm({ ...form, dayOfWeek: e.target.value })}>
                   {WEEKDAYS.map((d, i) => (
                     <option key={d} value={i}>
                       {d}
@@ -312,7 +361,7 @@ export function SchedulesPanel({
                   ))}
                 </SelectField>
               ) : form.frequency === "MONTHLY" ? (
-                <SelectField label="Day" value={form.dayOfMonth} error={formErrors.dayOfMonth} onChange={(e) => setForm({ ...form, dayOfMonth: e.target.value })}>
+                <SelectField label="Day" value={form.dayOfMonth} error={shownErrors.dayOfMonth} onChange={(e) => setForm({ ...form, dayOfMonth: e.target.value })}>
                   {Array.from({ length: 30 }, (_, i) => (
                     <option key={i + 1} value={i + 1}>
                       {ordinal(i + 1)}
@@ -321,8 +370,8 @@ export function SchedulesPanel({
                   <option value="31">Last day of the month</option>
                 </SelectField>
               ) : null}
-              <TextField label="Time (Dhaka)" type="time" value={form.time} error={formErrors.time} onChange={(e) => setForm({ ...form, time: e.target.value })} required />
-              <SelectField label="Format" value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value as FormState["format"] })}>
+              <TextField label="Time (Dhaka)" type="time" value={form.time} error={shownErrors.time} onChange={(e) => setForm({ ...form, time: e.target.value })} required />
+              <SelectField label="Format" value={form.format} error={shownErrors.format} onChange={(e) => setForm({ ...form, format: e.target.value as FormState["format"] })}>
                 <option value="XLSX">Excel</option>
                 <option value="PDF">PDF</option>
                 <option value="BOTH">Excel + PDF</option>
@@ -341,15 +390,20 @@ export function SchedulesPanel({
                   />
                 ))}
               </div>
-              {formErrors.recipientUserIds ? <p className={styles.fieldError}>{formErrors.recipientUserIds}</p> : null}
+              {shownErrors.recipientUserIds ? (
+                <p className={styles.fieldError} role="alert">
+                  {shownErrors.recipientUserIds}
+                </p>
+              ) : null}
             </fieldset>
             {caps.isFull ? (
               <TextAreaField
                 label="External email addresses"
-                helper="Comma-separated. They receive the owner’s view of the report, only while the owner has full Reports access."
+                helper="Comma-separated, up to 20. They receive the owner’s view of the report, only while the owner has full Reports access."
                 rows={2}
+                placeholder="name@company.com, other@company.com"
                 value={form.externalEmails}
-                error={formErrors.externalEmails}
+                error={shownErrors.externalEmails}
                 onChange={(e) => setForm({ ...form, externalEmails: e.target.value })}
               />
             ) : null}
@@ -371,6 +425,8 @@ export function SchedulesPanel({
 function HistoryDrawer({ schedule, onClose }: { schedule: ScheduleDto; onClose: () => void }) {
   const [runs, setRuns] = useState<RunDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<PdfRequest | null>(null);
+  const closeViewer = useCallback(() => setViewer(null), []);
   useEffect(() => {
     api<Page<RunDto>>(`/report-schedules/${schedule.id}/runs`, { query: { pageSize: 50 } })
       .then((r) => setRuns(r.data))
@@ -385,6 +441,7 @@ function HistoryDrawer({ schedule, onClose }: { schedule: ScheduleDto; onClose: 
   return (
     <div className={styles.drawerOverlay} onClick={onClose}>
       <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label="Run history" onClick={(e) => e.stopPropagation()}>
+        <PdfViewer request={viewer} onClose={closeViewer} />
         <header className={styles.drawerHead}>
           <div>
             <p className={styles.eyebrow}>Run history</p>
@@ -413,7 +470,19 @@ function HistoryDrawer({ schedule, onClose }: { schedule: ScheduleDto; onClose: 
                 <div className={styles.runFiles}>
                   {r.files.map((f) =>
                     f.downloadable ? (
-                      <Button key={f.index} kind="ghost" size="sm" onClick={() => void download(`/report-schedules/${schedule.id}/runs/${r.id}/files/${f.index}`, {}, f.name).catch((err) => setError(errorMessage(err)))}>
+                      <Button
+                        key={f.index}
+                        kind="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setViewer({
+                            title: schedule.reportTitle,
+                            subtitle: formatDhaka(r.startedAt),
+                            format: f.format === "XLSX" ? "xlsx" : "pdf",
+                            load: async () => ({ url: `/api/v1/report-schedules/${schedule.id}/runs/${r.id}/files/${f.index}`, fileName: f.name }),
+                          })
+                        }
+                      >
                         {f.format === "XLSX" ? "Excel" : "PDF"} · {f.name}
                       </Button>
                     ) : (

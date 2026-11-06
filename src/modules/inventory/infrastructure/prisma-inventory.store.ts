@@ -678,6 +678,43 @@ export function prismaInventoryStore(db: Db): InventoryStore {
       const whs = new Map((await store.warehouses(whIds)).map((w) => [w.id, w.code]));
       return rows.map((r) => ({ id: r.id, at: r.at, fromStatus: r.fromStatus, toStatus: r.toStatus, entry: r.entry, fromWarehouse: r.fromWarehouseId ? (whs.get(r.fromWarehouseId) ?? null) : null, toWarehouse: r.toWarehouseId ? (whs.get(r.toWarehouseId) ?? null) : null }));
     },
+    async serialArrival(id) {
+      const link = await db.entryLineSerial.findFirst({
+        where: { serialId: id, line: { entry: { type: { in: ["GRN_IMPORT", "GRN_LOCAL", "OPENING"] }, status: "POSTED" } } },
+        orderBy: [{ line: { entry: { postedAt: "desc" } } }, { id: "desc" }],
+        select: {
+          line: {
+            select: {
+              countryOfOrigin: true,
+              entry: {
+                select: {
+                  id: true,
+                  number: true,
+                  type: true,
+                  entryDate: true,
+                  warehouse: { select: { code: true } },
+                  supplier: { select: { name: true } },
+                  importShipment: { select: { blNo: true, boeNo: true, boeDate: true, countryOfOrigin: true } },
+                },
+              },
+            },
+          },
+        },
+      });
+      if (!link) return null;
+      const { entry, countryOfOrigin } = link.line;
+      const ship = entry.importShipment;
+      return {
+        entry: { id: entry.id, number: entry.number, type: entry.type },
+        entryDate: entry.entryDate.toISOString().slice(0, 10),
+        warehouseCode: entry.warehouse.code,
+        supplierName: entry.supplier?.name ?? null,
+        countryOfOrigin: countryOfOrigin ?? ship?.countryOfOrigin ?? null,
+        blNo: ship?.blNo ?? null,
+        boeNo: ship?.boeNo ?? null,
+        boeDate: ship?.boeDate ? ship.boeDate.toISOString().slice(0, 10) : null,
+      };
+    },
 
     /* ── attachments ── */
     attachments: (entityType, entityId) => db.attachment.findMany({ where: { entityType, entityId }, include: { uploadedBy: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),

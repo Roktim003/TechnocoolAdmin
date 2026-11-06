@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { NotificationBell } from "./NotificationBell";
+import { ThemeSwitch } from "./ThemeSwitch";
 import styles from "./AppShell.module.css";
 
 /** Top-bar actions (right side). */
 export function HeaderActions() {
   return (
     <div className={styles.actions}>
+      <ThemeSwitch />
       <NotificationBell />
     </div>
   );

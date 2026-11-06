@@ -8,14 +8,19 @@ import styles from "./Select.module.css";
 /**
  * Gr8r Studio select. A hidden native <select> stays the source of truth (value, name, onChange,
  * form submission all work as before); a styled button and popover menu sit on top of it.
- * Lists longer than FILTER_AT options get a filter box. Keyboard: ↑ ↓ Home End Enter Esc Tab,
- * and type-ahead when there is no filter.
+ * Lists longer than FILTER_AT options, and every `searchable` one, get a search box. Keyboard:
+ * ↑ ↓ Home End Enter Esc Tab, and type-ahead when there is no search box.
+ *
+ * The menu is portalled to <body> and positioned in page coordinates, so it scrolls with the
+ * page and stays under the button.
  */
 export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   /** Class for the visible trigger button (it takes the place of the select visually). */
   className?: string;
   /** id goes on the trigger so <label htmlFor> focuses it. */
   id?: string;
+  /** Always show the search box (lists of suppliers, projects, warehouses, …), however short. */
+  searchable?: boolean;
 }
 
 interface Item {
@@ -26,7 +31,7 @@ interface Item {
   index: number; // option index in the native select (-1 for groups)
 }
 
-const FILTER_AT = 10;
+const FILTER_AT = 5;
 
 /** Set the native select's value and fire a real change event so React's onChange runs. */
 function pick(sel: HTMLSelectElement, value: string) {
@@ -51,7 +56,7 @@ function readItems(sel: HTMLSelectElement): Item[] {
   return out;
 }
 
-export function Select({ className, id, children, disabled, "aria-label": ariaLabel, "aria-invalid": ariaInvalid, "aria-describedby": ariaDescribedBy, ...native }: SelectProps) {
+export function Select({ className, id, children, disabled, searchable,"aria-label": ariaLabel, "aria-invalid": ariaInvalid, "aria-describedby": ariaDescribedBy, ...native }: SelectProps) {
   const auto = useId();
   const triggerId = id ?? `${auto}-trigger`;
   const listId = `${auto}-list`;
@@ -81,7 +86,7 @@ export function Select({ className, id, children, disabled, "aria-label": ariaLa
 
   const shown = filter ? items.filter((it) => it.kind === "option" && it.label.toLowerCase().includes(filter.toLowerCase())) : items;
   const options = shown.filter((it) => it.kind === "option" && !it.disabled);
-  const withFilter = items.filter((it) => it.kind === "option").length > FILTER_AT;
+  const withFilter = !!searchable || items.filter((it) => it.kind === "option").length > FILTER_AT;
 
   const place = useCallback(() => {
     const t = trigger.current;
@@ -91,8 +96,9 @@ export function Select({ className, id, children, disabled, "aria-label": ariaLa
     const below = window.innerHeight - r.bottom;
     const up = below < h + 12 && r.top > below;
     const width = Math.max(r.width, 180);
-    const left = Math.min(r.left, window.innerWidth - width - 8);
-    setPos(up ? { left, width, bottom: window.innerHeight - r.top + 4 } : { left, width, top: r.bottom + 4 });
+    const left = Math.min(r.left, window.innerWidth - width - 8) + window.scrollX;
+    // Page coordinates (the menu is position: absolute on <body>), so page scrolling carries it along.
+    setPos({ left, width, top: (up ? r.top - h - 4 : r.bottom + 4) + window.scrollY });
   }, []);
 
   function openMenu() {
@@ -125,7 +131,8 @@ export function Select({ className, id, children, disabled, "aria-label": ariaLa
     place();
     if (withFilter) filterRef.current?.focus();
     const onScroll = (e: Event) => {
-      if (menu.current?.contains(e.target as Node)) return;
+      // Page scrolling already carries the menu along; only inner scroll areas move the button.
+      if (e.target === document || menu.current?.contains(e.target as Node)) return;
       place();
     };
     const onDown = (e: MouseEvent) => {
@@ -258,7 +265,7 @@ export function Select({ className, id, children, disabled, "aria-label": ariaLa
                   <input
                     ref={filterRef}
                     className={styles.filter}
-                    placeholder="Filter…"
+                    placeholder="Search…"
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                     role="combobox"

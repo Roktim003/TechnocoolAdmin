@@ -4,12 +4,15 @@ import Link from "next/link";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Checkbox, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
+import { FilePicker } from "@/components/ui/FilePicker";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Pagination } from "@/components/ui/Pagination";
 import { SkeletonLines } from "@/components/ui/Skeleton";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, errorMessage, upload, type Page } from "@/lib/api-client";
+import { collect, revealProblems, rules } from "@/lib/validation";
 import { formatDateTime, formatMoney } from "@/shared/time/format";
 import { ENTRY_TYPE_META, formatQty, newKey, STATUS_LABEL, STATUS_TAG } from "../../stock/_components/types";
 import {
@@ -32,6 +35,7 @@ import {
 } from "./types";
 import stock from "../../stock/_components/stock.module.css";
 import styles from "./projects.module.css";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 
 const bytes = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" }).format(new Date());
@@ -203,6 +207,38 @@ const periodLabel = (from?: string | null, to?: string | null) => {
 const monthToDate = (v: string) => (v ? `${v}-01` : null);
 const trimOrNull = (v: string) => v.trim() || null;
 
+const COST_LABELS: Record<string, string> = {
+  date: "Date",
+  category: "Category",
+  description: "Description",
+  amount: "Amount",
+  vendorOrPayee: "Payee / vendor",
+  referenceNo: "Reference",
+  periodFrom: "Period from",
+  periodTo: "Period to",
+  basisNote: "Basis note",
+  reason: "Reason",
+};
+
+/** Reasons (void, status change, closed-project edits): 3–500 characters; an optional one may be left empty. */
+export const reasonProblem = (v: string, required: boolean) =>
+  !v.trim() ? (required ? "Give a reason (at least 3 characters)." : undefined) : v.trim().length < 3 ? "Give a reason (at least 3 characters)." : rules.maxLength(v, 500);
+
+/** Browser-side checks for a cost line: the same rules as the server's AddCostSchema / UpdateCostSchema. */
+function costProblems(f: CostForm, o: { overhead: boolean; reason: "required" | "optional" | null; dateRequired?: boolean }) {
+  return collect(
+    ["date", o.dateRequired ? rules.chosen(f.date, "a date") : undefined],
+    ["category", rules.chosen(f.category, "a category")],
+    ["description", rules.required(f.description, "a description") ?? rules.maxLength(f.description, 300)],
+    ["amount", rules.required(f.amount, "the amount") ?? rules.money(f.amount, { positive: true })],
+    ["vendorOrPayee", rules.maxLength(f.vendorOrPayee, 150)],
+    ["referenceNo", rules.maxLength(f.referenceNo, 100)],
+    ["periodTo", o.overhead ? rules.notBefore(f.periodTo, f.periodFrom, "Period to can't be before period from.") : undefined],
+    ["basisNote", o.overhead ? rules.maxLength(f.basisNote, 300) : undefined],
+    ["reason", o.reason ? reasonProblem(f.reason, o.reason === "required") : undefined],
+  );
+}
+
 /** Body fields an overhead line adds (period, basis note, reason). */
 function overheadBody(f: CostForm) {
   return { periodFrom: monthToDate(f.periodFrom), periodTo: monthToDate(f.periodTo), basisNote: trimOrNull(f.basisNote), ...(f.reason.trim() ? { reason: f.reason.trim() } : {}) };
@@ -253,11 +289,13 @@ export function CostsTab({ project, caps, onCount, onChanged }: { project: Proje
   const [voiding, setVoiding] = useState<CostDto | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [voidError, setVoidError] = useState<string | undefined>();
+  const [voidAttempt, setVoidAttempt] = useState(false);
+  const [attempt, setAttempt] = useState(false);
+  const addRef = useRef<HTMLElement>(null);
   const [receipts, setReceipts] = useState<{ cost: CostDto; files: ProjectAttachmentDto[] } | null>(null);
   const [editing, setEditing] = useState<CostDto | null>(null);
   const [history, setHistory] = useState<CostDto | null>(null);
   const keyRef = useRef(newKey());
-  const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -282,8 +320,21 @@ export function CostsTab({ project, caps, onCount, onChanged }: { project: Proje
   const category = categories.includes(form.category as CostCategory) ? (form.category as CostCategory) : categories[0];
   const overheadChosen = !!category && isOverhead(category);
 
+  // Browser-side checks (same rules as the server); every problem is shown at once after the first attempt.
+  const problems = costProblems({ ...form, category: category ?? "" }, { overhead: overheadChosen, reason: overheadChosen && acts.overheadReasonRequired ? "required" : null });
+  const shownErrors = { ...errors, ...(attempt ? problems : {}) };
+  // A server error on a field disappears once the form is edited.
+  useEffect(() => setErrors({}), [form]);
+
+  const voidProblems = collect(["reason", reasonProblem(voidReason, true)]);
+
   async function add() {
     if (!category) return;
+    setAttempt(true);
+    if (Object.keys(problems).length) {
+      addRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     setSaving(true);
     setErrors({});
     try {
@@ -309,8 +360,8 @@ export function CostsTab({ project, caps, onCount, onChanged }: { project: Proje
         await upload(`/projects/${project.id}/costs/${c.id}/attachments`, fd).catch((err) => setNotice({ kind: "error", message: `Cost added, but the receipt didn't upload: ${errorMessage(err)}` }));
       }
       setForm(emptyCost(category));
+      setAttempt(false);
       setReceipt(null);
-      if (fileInput.current) fileInput.current.value = "";
       setNotice((n) => n ?? { kind: "success", message: isOverhead(c.category) ? `${COST_CATEGORY_LABEL[c.category]} added.` : `${COST_CATEGORY_LABEL[c.category]} cost added.` });
       setWarnings(c.warnings ?? []);
       await load();
@@ -326,9 +377,11 @@ export function CostsTab({ project, caps, onCount, onChanged }: { project: Proje
 
   async function doVoid() {
     if (!voiding) return;
+    setVoidAttempt(true);
     setVoidError(undefined);
+    if (Object.keys(voidProblems).length) return;
     try {
-      await api(`/projects/${project.id}/costs/${voiding.id}/void`, { method: "POST", body: { reason: voidReason }, headers: { "Idempotency-Key": newKey() } });
+      await api(`/projects/${project.id}/costs/${voiding.id}/void`, { method: "POST", body: { reason: voidReason.trim() }, headers: { "Idempotency-Key": newKey() } });
       setVoiding(null);
       setVoidReason("");
       setNotice({ kind: "success", message: "Cost voided. It stays on record but no longer counts." });
@@ -367,7 +420,7 @@ export function CostsTab({ project, caps, onCount, onChanged }: { project: Proje
       <WarningsNotice warnings={warnings} onClose={() => setWarnings([])} />
 
       {canAdd ? (
-        <section className={stock.section} aria-labelledby="add-cost">
+        <section ref={addRef} className={stock.section} aria-labelledby="add-cost">
           <h2 id="add-cost" className={stock.sectionTitle} style={{ marginBottom: "var(--space-5)" }}>
             {!acts.addOverhead ? "Add a cost" : acts.addCost ? "Add a cost or overhead" : "Add an overhead"}
           </h2>
@@ -375,6 +428,11 @@ export function CostsTab({ project, caps, onCount, onChanged }: { project: Proje
             <Notification kind="info" className={styles.formNote}>
               The project is closed: labour, transport and other costs can no longer be added or voided. Overheads can still be added or corrected, with a reason.
             </Notification>
+          ) : null}
+          {attempt && Object.keys(problems).length ? (
+            <div className={styles.formNote}>
+              <FormProblems problems={problems} labels={COST_LABELS} />
+            </div>
           ) : null}
           <form
             className={styles.costForm}
@@ -384,8 +442,8 @@ export function CostsTab({ project, caps, onCount, onChanged }: { project: Proje
               void add();
             }}
           >
-            <TextField label="Date" type="date" max={today()} value={form.date} onChange={(e) => set("date", e.target.value)} error={errors.date} />
-            <SelectField label="Category" value={category} onChange={(e) => set("category", e.target.value)} error={errors.category}>
+            <TextField label="Date" type="date" max={today()} value={form.date} onChange={(e) => set("date", e.target.value)} error={shownErrors.date} />
+            <SelectField searchable label="Category" value={category} onChange={(e) => set("category", e.target.value)} error={shownErrors.category}>
               {acts.addOverhead ? (
                 <>
                   {acts.addCost ? <optgroup label="Direct costs">{DIRECT_COST_CATEGORIES.map(option)}</optgroup> : null}
@@ -395,17 +453,12 @@ export function CostsTab({ project, caps, onCount, onChanged }: { project: Proje
                 categories.map(option)
               )}
             </SelectField>
-            <TextField label="Description *" value={form.description} onChange={(e) => set("description", e.target.value)} error={errors.description} fieldClassName={styles.wide} />
-            <TextField label="Amount (৳) *" inputMode="decimal" value={form.amount} onChange={(e) => set("amount", e.target.value)} error={errors.amount} />
-            <TextField label="Payee / vendor" value={form.vendorOrPayee} onChange={(e) => set("vendorOrPayee", e.target.value)} error={errors.vendorOrPayee} />
-            <TextField label="Reference" value={form.referenceNo} onChange={(e) => set("referenceNo", e.target.value)} error={errors.referenceNo} placeholder="Bill / voucher no." />
-            {overheadChosen ? <OverheadFields form={form} set={set} errors={errors} reasonRequired={acts.overheadReasonRequired} wide={styles.wide} /> : null}
-            <div>
-              <label className={stock.muted} htmlFor="receipt-file" style={{ display: "block", marginBottom: "var(--space-2)", fontSize: "var(--text-xs)" }}>
-                Receipt (optional)
-              </label>
-              <input id="receipt-file" ref={fileInput} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setReceipt(e.target.files?.[0] ?? null)} />
-            </div>
+            <TextField label="Description *" value={form.description} onChange={(e) => set("description", e.target.value)} error={shownErrors.description} fieldClassName={styles.wide} />
+            <TextField label="Amount (৳) *" kind="money" value={form.amount} onChange={(e) => set("amount", e.target.value)} error={shownErrors.amount} />
+            <TextField label="Payee / vendor" value={form.vendorOrPayee} onChange={(e) => set("vendorOrPayee", e.target.value)} error={shownErrors.vendorOrPayee} />
+            <TextField label="Reference" value={form.referenceNo} onChange={(e) => set("referenceNo", e.target.value)} error={shownErrors.referenceNo} placeholder="Bill / voucher no." />
+            {overheadChosen ? <OverheadFields form={form} set={set} errors={shownErrors} reasonRequired={acts.overheadReasonRequired} wide={styles.wide} /> : null}
+            <FilePicker label="Receipt (optional)" file={receipt} onChange={setReceipt} hint="PDF, JPG, PNG or WebP · up to 10 MB · uploaded when you add the cost" />
             <div>
               <Button type="submit" disabled={saving}>
                 {saving ? "Adding…" : overheadChosen ? "Add overhead" : "Add cost"}
@@ -493,7 +546,7 @@ export function CostsTab({ project, caps, onCount, onChanged }: { project: Proje
                                 </button>
                               ) : null}
                               {c.actions.void ? (
-                                <Button kind="ghost" size="sm" onClick={() => (setVoiding(c), setVoidReason(""), setVoidError(undefined))}>
+                                <Button kind="ghost" size="sm" onClick={() => (setVoiding(c), setVoidReason(""), setVoidError(undefined), setVoidAttempt(false))}>
                                   Void
                                 </Button>
                               ) : null}
@@ -532,8 +585,16 @@ export function CostsTab({ project, caps, onCount, onChanged }: { project: Proje
       )}
 
       <Modal open={!!voiding} title="Void cost" label={voiding?.description} primaryText="Void cost" primaryKind="danger" onClose={() => setVoiding(null)} onSubmit={() => void doVoid()}>
+        <FormProblems problems={voidAttempt ? voidProblems : {}} labels={COST_LABELS} />
         <p style={{ marginBottom: "var(--space-5)" }}>The cost stays on record (struck through) but no longer counts in the totals. This can&apos;t be undone.</p>
-        <TextAreaField label="Reason" rows={3} value={voidReason} onChange={(e) => setVoidReason(e.target.value)} error={voidError} required />
+        <TextAreaField
+          label="Reason *"
+          rows={3}
+          value={voidReason}
+          onChange={(e) => (setVoidReason(e.target.value), setVoidError(undefined))}
+          error={(voidAttempt ? voidProblems.reason : undefined) ?? voidError}
+          required
+        />
       </Modal>
 
       {receipts ? (
@@ -587,13 +648,22 @@ function EditOverheadModal({ project, cost, onClose, onSaved }: { project: Proje
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [attempt, setAttempt] = useState(false);
+  const gridRef = useRef<HTMLDivElement>(null);
   const set = (k: keyof CostForm, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  // Browser-side checks (same rules as the server); every problem is shown at once after the first attempt.
+  const problems = costProblems(form, { overhead: true, reason: reasonRequired ? "required" : "optional", dateRequired: true });
+  const shownErrors = { ...errors, ...(attempt ? problems : {}) };
+  // A server error on a field disappears once the form is edited.
+  useEffect(() => setErrors({}), [form]);
+
   async function save() {
-    if (reasonRequired && form.reason.trim().length < 3) return setErrors({ reason: "The project is closed: give a reason (at least 3 characters)." });
+    setAttempt(true);
+    setError(null);
+    if (Object.keys(problems).length) return revealProblems(gridRef.current?.parentElement);
     setSaving(true);
     setErrors({});
-    setError(null);
     try {
       const r = await api<{ data: CostDto & { warnings?: CostWarning[] } }>(`/projects/${project.id}/costs/${cost.id}`, {
         method: "PATCH",
@@ -611,6 +681,7 @@ function EditOverheadModal({ project, cost, onClose, onSaved }: { project: Proje
     } catch (err) {
       if (err instanceof ApiError && Object.keys(err.fieldErrors()).length) setErrors(err.fieldErrors());
       else setError(errorMessage(err));
+      revealProblems(gridRef.current?.parentElement);
     } finally {
       setSaving(false);
     }
@@ -618,27 +689,28 @@ function EditOverheadModal({ project, cost, onClose, onSaved }: { project: Proje
 
   return (
     <Modal open title="Edit overhead" label={`${project.code} · ${cost.categoryLabel}`} primaryText="Save changes" submitting={saving} onClose={onClose} onSubmit={() => void save()}>
+      {attempt ? <FormProblems problems={problems} labels={COST_LABELS} /> : null}
       {error ? <Notification kind="error">{error}</Notification> : null}
-      <div className={stock.grid}>
-        <TextField label="Date" type="date" max={today()} value={form.date} onChange={(e) => set("date", e.target.value)} error={errors.date} />
-        <SelectField label="Category" value={form.category} onChange={(e) => set("category", e.target.value)} error={errors.category}>
+      <div ref={gridRef} className={stock.grid}>
+        <TextField label="Date *" type="date" max={today()} value={form.date} onChange={(e) => set("date", e.target.value)} error={shownErrors.date} />
+        <SelectField searchable label="Category" value={form.category} onChange={(e) => set("category", e.target.value)} error={shownErrors.category}>
           {OVERHEAD_CATEGORIES.map((c) => (
             <option key={c} value={c}>
               {COST_CATEGORY_LABEL[c]}
             </option>
           ))}
         </SelectField>
-        <TextField label="Description *" value={form.description} onChange={(e) => set("description", e.target.value)} error={errors.description} fieldClassName={stock.full} />
-        <TextField label="Amount (৳) *" inputMode="decimal" value={form.amount} onChange={(e) => set("amount", e.target.value)} error={errors.amount} />
-        <TextField label="Payee / vendor" value={form.vendorOrPayee} onChange={(e) => set("vendorOrPayee", e.target.value)} error={errors.vendorOrPayee} />
-        <TextField label="Reference" value={form.referenceNo} onChange={(e) => set("referenceNo", e.target.value)} error={errors.referenceNo} placeholder="Bill / voucher no." />
-        <OverheadFields form={form} set={set} errors={errors} reasonRequired={false} wide={stock.full} />
+        <TextField label="Description *" value={form.description} onChange={(e) => set("description", e.target.value)} error={shownErrors.description} fieldClassName={stock.full} />
+        <TextField label="Amount (৳) *" kind="money" value={form.amount} onChange={(e) => set("amount", e.target.value)} error={shownErrors.amount} />
+        <TextField label="Payee / vendor" value={form.vendorOrPayee} onChange={(e) => set("vendorOrPayee", e.target.value)} error={shownErrors.vendorOrPayee} />
+        <TextField label="Reference" value={form.referenceNo} onChange={(e) => set("referenceNo", e.target.value)} error={shownErrors.referenceNo} placeholder="Bill / voucher no." />
+        <OverheadFields form={form} set={set} errors={shownErrors} reasonRequired={false} wide={stock.full} />
         <TextAreaField
           label={reasonRequired ? "Reason *" : "Reason (optional)"}
           rows={2}
           value={form.reason}
           onChange={(e) => set("reason", e.target.value)}
-          error={errors.reason}
+          error={shownErrors.reason}
           helper={reasonRequired ? "The project is closed. The reason is kept in the history." : "Kept in the history."}
           fieldClassName={stock.full}
         />
@@ -818,7 +890,7 @@ export function DocumentsTab({ project, caps: _caps }: { project: ProjectDto; ca
   }
 
   async function remove(a: ProjectAttachmentDto) {
-    if (!window.confirm(`Remove ${a.fileName}?`)) return;
+    if (!(await confirmDialog({ title: `Remove ${a.fileName}?`, message: "The file is removed from this project. This can't be undone.", confirmText: "Remove file", danger: true }))) return;
     try {
       await api(`/projects/${project.id}/attachments/${a.id}`, { method: "DELETE" });
       await load();

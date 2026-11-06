@@ -107,7 +107,7 @@ export function StockLevels({ caps, warehouses }: { caps: StockCaps; warehouses:
         toolbar={
           <div className={styles.toolbar}>
             <TextField label="Search" placeholder="Code, name, model…" value={q} onChange={(e) => setQ(e.target.value)} fieldClassName={styles.search} />
-            <SelectField label="Warehouse" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
+            <SelectField searchable label="Warehouse" value={warehouseId} onChange={(e) => (setWarehouseId(e.target.value), setPage(1))} fieldClassName={styles.filter}>
               <option value="">All my warehouses</option>
               {mine.map((w) => (
                 <option key={w.id} value={w.id}>

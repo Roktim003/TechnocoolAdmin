@@ -5,11 +5,13 @@ import { useId, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import fieldStyles from "@/components/ui/Field.module.css";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Icon } from "@/components/ui/Icon";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, download, errorMessage, uploadWithProgress } from "@/lib/api-client";
+import { collect, rules, type Problems } from "@/lib/validation";
 import {
   CI_CURRENCIES,
   CUSTOMS_STATIONS,
@@ -34,12 +36,15 @@ import {
 } from "./import-docs";
 import stockStyles from "./stock.module.css";
 import styles from "./import-docs.module.css";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 
 type FieldKey = keyof ShipmentForm;
 interface FieldDef {
   key: FieldKey;
   label: string;
-  kind?: "date" | "int" | "decimal" | "currency" | "incoterm" | "containers" | "station";
+  kind?: "date" | "integer" | "qty" | "money" | "currency" | "incoterm" | "containers" | "station";
+  /** Max characters (server ImportShipmentSchema). */
+  max?: number;
   full?: boolean;
   /** Hidden without seeCost. */
   cost?: boolean;
@@ -48,40 +53,66 @@ interface FieldDef {
 
 const FIELDS: Record<ImportDocType, FieldDef[]> = {
   BL: [
-    { key: "blNo", label: "BL no.", mono: true },
+    { key: "blNo", label: "BL no.", mono: true, max: 100 },
     { key: "blDate", label: "BL date", kind: "date" },
-    { key: "shippingLine", label: "Shipping line" },
-    { key: "vesselVoyage", label: "Vessel / voyage" },
-    { key: "portOfLoading", label: "Port of loading" },
-    { key: "portOfDischarge", label: "Port of discharge" },
+    { key: "shippingLine", label: "Shipping line", max: 150 },
+    { key: "vesselVoyage", label: "Vessel / voyage", max: 150 },
+    { key: "portOfLoading", label: "Port of loading", max: 150 },
+    { key: "portOfDischarge", label: "Port of discharge", max: 150 },
     { key: "containerNumbers", label: "Container numbers", kind: "containers", full: true },
   ],
   CO: [
-    { key: "coNo", label: "CO no.", mono: true },
+    { key: "coNo", label: "CO no.", mono: true, max: 100 },
     { key: "coDate", label: "CO date", kind: "date" },
-    { key: "countryOfOrigin", label: "Country of origin" },
-    { key: "coIssuingAuthority", label: "Issuing authority" },
+    { key: "countryOfOrigin", label: "Country of origin", max: 100 },
+    { key: "coIssuingAuthority", label: "Issuing authority", max: 150 },
   ],
   PL: [
-    { key: "plNo", label: "PL no.", mono: true },
+    { key: "plNo", label: "PL no.", mono: true, max: 100 },
     { key: "plDate", label: "PL date", kind: "date" },
-    { key: "packageCount", label: "Packages", kind: "int" },
-    { key: "grossWeightKg", label: "Gross weight (kg)", kind: "decimal" },
-    { key: "netWeightKg", label: "Net weight (kg)", kind: "decimal" },
+    { key: "packageCount", label: "Packages", kind: "integer" },
+    { key: "grossWeightKg", label: "Gross weight (kg)", kind: "qty" },
+    { key: "netWeightKg", label: "Net weight (kg)", kind: "qty" },
   ],
   CI: [
-    { key: "ciNo", label: "CI no.", mono: true },
+    { key: "ciNo", label: "CI no.", mono: true, max: 100 },
     { key: "ciDate", label: "CI date", kind: "date" },
     { key: "ciCurrency", label: "Currency", kind: "currency" },
-    { key: "ciValue", label: "Invoice value", kind: "decimal", cost: true },
+    { key: "ciValue", label: "Invoice value", kind: "money", cost: true },
     { key: "incoterm", label: "Incoterm", kind: "incoterm" },
   ],
   BOE: [
-    { key: "boeNo", label: "B/E no.", mono: true },
+    { key: "boeNo", label: "B/E no.", mono: true, max: 100 },
     { key: "boeDate", label: "B/E date", kind: "date" },
-    { key: "customsStation", label: "Customs station", kind: "station", full: true },
+    { key: "customsStation", label: "Customs station", kind: "station", full: true, max: 150 },
   ],
 };
+
+/** Field names for the problem summary, e.g. "Packing List: Packages". */
+export const SHIPMENT_LABELS: Record<string, string> = Object.fromEntries(DOC_TYPES.flatMap((t) => FIELDS[t].map((f) => [f.key, `${DOC_LABEL[t]}: ${f.label}`])));
+
+/**
+ * Browser-side checks of the shipment details (same rules as the server's ImportShipmentSchema):
+ * lengths, whole package count, weights with ≤ 3 decimals, invoice value with ≤ 2 decimals, container numbers.
+ */
+export function checkShipment(s: ShipmentForm, seeCost: boolean): Problems {
+  return collect(
+    ...DOC_TYPES.flatMap((t) =>
+      FIELDS[t].map((f): [string, string | undefined] => {
+        if (f.key === "containerNumbers") {
+          const long = s.containerNumbers.find((c) => c.length > 20);
+          return [f.key, long ? `${long} is too long: a container number has at most 20 characters.` : s.containerNumbers.length > 100 ? "Enter at most 100 container numbers." : undefined];
+        }
+        const v = s[f.key];
+        if (f.cost && !seeCost) return [f.key, undefined];
+        if (f.kind === "integer") return [f.key, rules.integer(v, { min: 0, max: 1_000_000 })];
+        if (f.kind === "qty") return [f.key, rules.qty(v)];
+        if (f.kind === "money") return [f.key, rules.money(v)];
+        return [f.key, f.max ? rules.maxLength(v, f.max) : undefined];
+      }),
+    ),
+  );
+}
 
 export interface ImportDocumentsProps {
   shipment: ShipmentForm;
@@ -101,6 +132,8 @@ export interface ImportDocumentsProps {
   warnings: Pick<ImportWarning, "code" | "message" | "link">[];
   /** Field errors keyed by shipment field (e.g. "blDate"). */
   errors?: Record<string, string>;
+  /** Browser-side problems (checkShipment) to list at the top of the section after a save attempt. */
+  problems?: Record<string, string>;
   /** Buttons at the top right (detail page: Edit / Save). */
   actions?: ReactNode;
   layout?: "list" | "gallery";
@@ -115,7 +148,12 @@ export function ImportDocuments(p: ImportDocumentsProps) {
   const [removing, setRemoving] = useState<ImportAttachment | null>(null);
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState<string | undefined>();
+  const [reasonAttempt, setReasonAttempt] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Removing a file from a posted entry: reason of 3–500 characters (server RemoveAttachmentSchema).
+  const reasonProblem = rules.required(reason, "a reason") ?? (reason.trim().length < 3 ? "Use at least 3 characters." : rules.maxLength(reason, 500));
+  const shownReasonError = (reasonAttempt ? reasonProblem : undefined) ?? reasonError;
 
   async function remove(a: ImportAttachment, why?: string) {
     if (!p.entryId) return;
@@ -141,8 +179,11 @@ export function ImportDocuments(p: ImportDocumentsProps) {
     if (rule.reasonRequired) {
       setReason("");
       setReasonError(undefined);
+      setReasonAttempt(false);
       setRemoving(a);
-    } else if (window.confirm(`Remove ${a.fileName}?`)) void remove(a);
+    } else void confirmDialog({ title: `Remove ${a.fileName}?`, message: "The document is removed from this import. This can't be undone.", confirmText: "Remove document", danger: true }).then((ok) => {
+        if (ok) void remove(a);
+      });
   }
 
   const canRemove = (a: ImportAttachment) => p.removeRule(a).allowed;
@@ -164,6 +205,12 @@ export function ImportDocuments(p: ImportDocumentsProps) {
           {p.actions}
         </div>
       </div>
+
+      {p.problems && Object.keys(p.problems).length ? (
+        <div style={{ marginBottom: "var(--space-5)" }}>
+          <FormProblems problems={p.problems} labels={SHIPMENT_LABELS} />
+        </div>
+      ) : null}
 
       <div className={styles.grid}>
         {DOC_TYPES.map((t) => (
@@ -189,12 +236,14 @@ export function ImportDocuments(p: ImportDocumentsProps) {
         submitting={busy}
         onClose={() => setRemoving(null)}
         onSubmit={() => {
-          if (reason.trim().length < 3) return setReasonError("Give a reason (at least 3 characters).");
+          setReasonAttempt(true);
+          if (reasonProblem) return;
           if (removing) void remove(removing, reason.trim());
         }}
       >
+        {reasonAttempt && reasonProblem ? <FormProblems problems={{ reason: reasonProblem }} labels={{ reason: "Reason" }} title="1 thing to fix before removing" /> : null}
         <p style={{ marginBottom: "var(--space-5)" }}>The entry is posted, so removing a document file is recorded in the audit log with your reason.</p>
-        <TextAreaField label="Reason" rows={3} value={reason} onChange={(ev) => (setReason(ev.target.value), setReasonError(undefined))} error={reasonError} required />
+        <TextAreaField label="Reason" rows={3} value={reason} onChange={(ev) => (setReason(ev.target.value), setReasonError(undefined))} error={shownReasonError} helper="3–500 characters." required />
       </Modal>
     </section>
   );
@@ -351,7 +400,7 @@ function DocField({ def: f, shipment, onChange, error }: { def: FieldDef; shipme
       <TextField
         label={f.label}
         type={f.kind === "date" ? "date" : "text"}
-        inputMode={f.kind === "int" ? "numeric" : f.kind === "decimal" ? "decimal" : undefined}
+        kind={f.kind === "integer" || f.kind === "qty" || f.kind === "money" ? f.kind : undefined}
         mono={f.mono}
         value={value}
         onChange={(e) => set(e.target.value)}

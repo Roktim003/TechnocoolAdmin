@@ -4,12 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Checkbox, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Pagination } from "@/components/ui/Pagination";
 import { SkeletonLines } from "@/components/ui/Skeleton";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, errorMessage, upload, type Page } from "@/lib/api-client";
+import { collect } from "@/lib/validation";
+import { reasonProblem } from "./CostFormModal";
 import { formatDateTime, formatMoney } from "@/shared/time/format";
 import { newKey } from "../../stock/_components/types";
 import {
@@ -29,6 +32,7 @@ import {
 } from "./types";
 import stock from "../../stock/_components/stock.module.css";
 import css from "./warehouse-costs.module.css";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 
 type Notify = (n: { kind: "success" | "error"; message: string }) => void;
 type ListResult = Page<WarehouseCostDto> & { totals?: { amount: string } };
@@ -177,7 +181,7 @@ export function EntriesTab({ warehouses, version, onEdit, notify }: { warehouses
           </option>
         ))}
       </SelectField>
-      <SelectField label="Warehouse" value={warehouseId} onChange={(e) => filter(setWarehouseId)(e.target.value)} fieldClassName={stock.filter} disabled={scope === "COMPANY"}>
+      <SelectField searchable label="Warehouse" value={warehouseId} onChange={(e) => filter(setWarehouseId)(e.target.value)} fieldClassName={stock.filter} disabled={scope === "COMPANY"}>
         <option value="">All my warehouses</option>
         {warehouses.map((w) => (
           <option key={w.id} value={w.id}>
@@ -256,13 +260,18 @@ function VoidModal({ cost, onClose, onVoided }: { cost: WarehouseCostDto; onClos
   const [error, setError] = useState<string | undefined>();
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [attempt, setAttempt] = useState(false);
   const keyRef = useRef(newKey());
+  // Browser-side check (same rule as the server's VoidWarehouseCostSchema).
+  const problems = collect(["reason", reasonProblem(reason, true)]);
   async function submit() {
-    setSaving(true);
+    setAttempt(true);
     setError(undefined);
     setFormError(null);
+    if (Object.keys(problems).length) return;
+    setSaving(true);
     try {
-      await api(`/warehouse-costs/${cost.id}/void`, { method: "POST", body: { reason }, headers: { "Idempotency-Key": keyRef.current } });
+      await api(`/warehouse-costs/${cost.id}/void`, { method: "POST", body: { reason: reason.trim() }, headers: { "Idempotency-Key": keyRef.current } });
       await onVoided();
     } catch (err) {
       if (err instanceof ApiError && err.fieldErrors().reason) setError(err.fieldErrors().reason);
@@ -274,12 +283,13 @@ function VoidModal({ cost, onClose, onVoided }: { cost: WarehouseCostDto; onClos
   }
   return (
     <Modal open title="Void cost" label={`${monthLabel(cost.month)} · ${cost.warehouse?.name ?? "Company"} · ${CATEGORY_SHORT[cost.category]}`} primaryText="Void cost" primaryKind="danger" submitting={saving} onClose={onClose} onSubmit={() => void submit()}>
+      <FormProblems problems={attempt ? problems : {}} labels={{ reason: "Reason" }} />
       {formError ? <Notification kind="error">{formError}</Notification> : null}
       <p>
         {cost.description} · <strong>{formatMoney(cost.amount)}</strong>
       </p>
       <p className={stock.muted}>The cost stays on record (struck through) but no longer counts in totals or the monthly summary. This can&apos;t be undone.</p>
-      <TextAreaField label="Reason *" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} error={error} required />
+      <TextAreaField label="Reason *" rows={3} value={reason} onChange={(e) => (setReason(e.target.value), setError(undefined))} error={(attempt ? problems.reason : undefined) ?? error} required />
     </Modal>
   );
 }
@@ -402,7 +412,7 @@ function ReceiptsModal({ cost, onClose, onChanged }: { cost: WarehouseCostDto; o
   }
 
   async function remove(a: CostAttachmentDto) {
-    if (!window.confirm(`Remove ${a.fileName}?`)) return;
+    if (!(await confirmDialog({ title: `Remove ${a.fileName}?`, message: "The file is removed from this cost entry. This can't be undone.", confirmText: "Remove file", danger: true }))) return;
     try {
       await api(`/warehouse-costs/${cost.id}/attachments/${a.id}`, { method: "DELETE" });
       await Promise.all([load(), onChanged()]);

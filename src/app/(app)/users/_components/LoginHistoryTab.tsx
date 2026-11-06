@@ -93,7 +93,7 @@ export function LoginHistoryTab({ notify }: { notify: Notify }) {
       emptyMessage="No login attempts match these filters."
       toolbar={
         <div className={styles.filters}>
-          <SelectField label="User" value={filters.userId} onChange={setFilter("userId")}>
+          <SelectField searchable label="User" value={filters.userId} onChange={setFilter("userId")}>
             <option value="">All users</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>

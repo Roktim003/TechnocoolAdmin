@@ -2,18 +2,22 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { Checkbox, TextAreaField, TextField } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, errorMessage, upload } from "@/lib/api-client";
+import { collect, rules, sanitize } from "@/lib/validation";
+import { PdfViewer, type PdfRequest } from "@/components/ui/PdfViewer";
+import { waitForDocument } from "@/lib/documents";
 import { allowedKinds, DOCUMENT_TITLES } from "@/modules/inventory/infrastructure/document-template";
 import { formatDateTime, formatMoney } from "@/shared/time/format";
 import { CHARGE_TYPES, formatAmount, formatQty, newKey, STATUS_LABEL, STATUS_TAG, type EntryDto, type StockCaps } from "./types";
-import { ImportDocuments } from "./ImportDocuments";
+import { checkShipment, ImportDocuments } from "./ImportDocuments";
 import {
   DEFAULT_REQUIRED,
   emptyAttachments,
@@ -28,6 +32,7 @@ import {
   type ImportWarning,
 } from "./import-docs";
 import styles from "./stock.module.css";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface Attachment {
   id: string;
@@ -63,6 +68,12 @@ const REFERENCE_LABELS: Record<string, string> = {
   customerAddress: "Delivery address",
 };
 
+/** A quantity string ("5", "2.5", "5.000") as thousandths, so it compares without floats. */
+const milli = (s: string) => {
+  const [int = "0", frac = ""] = s.trim().split(".");
+  return BigInt(int || "0") * 1000n + BigInt((frac + "000").slice(0, 3));
+};
+
 const bytes = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 
 export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial: EntryDetailDto; saved: string | null }) {
@@ -76,13 +87,21 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
   const [docDraft, setDocDraft] = useState<ReturnType<typeof toShipmentForm> | null>(null);
   const [docErrors, setDocErrors] = useState<Record<string, string>>({});
   const [docSaving, setDocSaving] = useState(false);
+  const [docAttempt, setDocAttempt] = useState(false);
+  // A server error on a document field disappears once the details are edited.
+  useEffect(() => setDocErrors({}), [docDraft]);
   const [busy, setBusy] = useState<string | null>(null);
   const [modal, setModal] = useState<"reject" | "reverse" | "cancel" | null>(null);
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState<string | undefined>();
+  const [reasonAttempt, setReasonAttempt] = useState(false);
+  const [receiveAttempt, setReceiveAttempt] = useState(false);
+  // Each time a reason modal opens or closes, start without errors.
+  useEffect(() => setReasonAttempt(false), [modal]);
   const [belowCost, setBelowCost] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [printing, setPrinting] = useState<string | null>(null);
+  const [pdf, setPdf] = useState<PdfRequest | null>(null);
+  const closePdf = useCallback(() => setPdf(null), []);
   const [received, setReceived] = useState<Record<string, string>>(() => Object.fromEntries(initial.lines.map((l) => [l.id, l.qty])));
   const [arrived, setArrived] = useState<Record<string, string[]>>(() => Object.fromEntries(initial.lines.map((l) => [l.id, l.serials.map((s) => s.serial)])));
   const keyRef = useRef(newKey());
@@ -160,25 +179,16 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
     }
   }
 
-  async function print(kind: string) {
-    setPrinting(kind);
-    try {
-      const job = (await api<{ data: { jobId: string } }>(`/stock-entries/${e.id}/documents`, { method: "POST", body: { kind } })).data;
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 800));
-        const s = (await api<{ data: { status: string; downloadUrl: string | null; failedReason: string | null } }>(`/documents/${job.jobId}`)).data;
-        if (s.status === "completed" && s.downloadUrl) {
-          window.open(s.downloadUrl, "_blank", "noopener");
-          return;
-        }
-        if (s.status === "failed") throw new Error(s.failedReason ?? "The PDF couldn't be created.");
-      }
-      throw new Error("The PDF is taking too long. Try again in a minute.");
-    } catch (err) {
-      setNotice({ kind: "error", title: "Couldn't create the PDF", message: errorMessage(err) });
-    } finally {
-      setPrinting(null);
-    }
+  /** Opens the PDF viewer; it shows a loader while the worker renders the document. */
+  function print(kind: string) {
+    setPdf({
+      title: DOCUMENT_TITLES[kind as keyof typeof DOCUMENT_TITLES] ?? "Document",
+      subtitle: e.displayNumber,
+      load: async (signal) => {
+        const job = (await api<{ data: { jobId: string } }>(`/stock-entries/${e.id}/documents`, { method: "POST", body: { kind } })).data;
+        return waitForDocument(job.jobId, `${e.displayNumber}.pdf`, signal);
+      },
+    });
   }
 
   async function addFiles(files: FileList | null) {
@@ -198,7 +208,7 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
   }
 
   async function removeFile(a: Attachment) {
-    if (!window.confirm(`Remove ${a.fileName}?`)) return;
+    if (!(await confirmDialog({ title: `Remove ${a.fileName}?`, message: "The file is removed from this entry. This can't be undone.", confirmText: "Remove file", danger: true }))) return;
     try {
       await api(`/stock-entries/${e.id}/attachments/${a.id}`, { method: "DELETE" });
       setAttachments((list) => list.filter((x) => x.id !== a.id));
@@ -210,6 +220,11 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
   /** Saves the document details (PATCH import-shipment); never changes stock or cost. */
   async function saveDocs() {
     if (!docDraft) return;
+    setDocAttempt(true);
+    if (Object.keys(checkShipment(docDraft, caps.seeCost)).length) {
+      document.getElementById("import-documents")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     setDocSaving(true);
     setDocErrors({});
     try {
@@ -219,6 +234,7 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
       if (r.importAttachments) setImportFiles(r.importAttachments);
       setImportWarnings(r.importWarnings ?? []);
       setDocDraft(null);
+      setDocAttempt(false);
       setNotice({ kind: "success", message: "Import document details saved." });
     } catch (err) {
       if (err instanceof ApiError && Object.keys(err.fieldErrors()).length) setDocErrors(err.fieldErrors());
@@ -240,6 +256,57 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
   const refs = Object.entries(e.references).filter(([k, v]) => v && !(isImport && k === "billOfEntryNo"));
   const isTransferReceive = x.receive;
   const priceHeader = e.type === "SALE" ? "Unit price" : e.type === "GRN_IMPORT" ? `Unit price (${e.currency})` : "Unit cost";
+
+  // Import document details being edited: browser checks after the first save attempt, live afterwards.
+  const docProblems = docDraft && docAttempt ? checkShipment(docDraft, caps.seeCost) : {};
+
+  // Reject / reverse reason: 3–500 characters (server ReasonSchema).
+  const reasonProblem = rules.required(reason, "a reason") ?? (reason.trim().length < 3 ? "Use at least 3 characters." : rules.maxLength(reason, 500));
+  const shownReasonError = (reasonAttempt ? reasonProblem : undefined) ?? reasonError;
+  const closeReason = () => {
+    setModal(null);
+    setReasonError(undefined);
+    setReasonAttempt(false);
+  };
+
+  // Receive a transfer: what arrived per line, same rules as the server (0 … dispatched; whole units and
+  // exactly that many ticked serials for serial-tracked products).
+  const receiveProblems = isTransferReceive
+    ? collect(
+        ...e.lines.flatMap((l): [string, string | undefined][] => {
+          const v = (received[l.id] ?? "").trim();
+          const qtyProblem =
+            rules.required(v, "the quantity that arrived (0 if none)") ??
+            rules.qty(v, { whole: l.product.trackSerial }) ??
+            (milli(v) > milli(l.qty) ? `Can't be more than the ${formatQty(l.qty)} dispatched.` : undefined);
+          const short = !qtyProblem && milli(v) < milli(l.qty);
+          const ticked = arrived[l.id]?.length ?? 0;
+          const want = qtyProblem ? 0 : Number(milli(v) / 1000n);
+          const serialProblem = short && l.product.trackSerial && l.serials.length > 0 && ticked !== want ? `Tick the ${want} serial number${want === 1 ? "" : "s"} that arrived (${ticked} ticked).` : undefined;
+          return [
+            [`qty:${l.id}`, qtyProblem],
+            [`serials:${l.id}`, serialProblem],
+          ];
+        }),
+      )
+    : {};
+  const receiveLabels = Object.fromEntries(e.lines.flatMap((l) => [[`qty:${l.id}`, `${l.product.code} received`] as const, [`serials:${l.id}`, `${l.product.code} serials`] as const]));
+  const receiveErr = (k: string) => (receiveAttempt ? receiveProblems[k] : undefined);
+
+  function confirmReceipt() {
+    setReceiveAttempt(true);
+    if (Object.keys(receiveProblems).length) {
+      document.getElementById("receive")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    void act("receive", {
+      lines: e.lines.map((l) => ({
+        lineId: l.id,
+        receivedQty: (received[l.id] ?? "").trim() || "0",
+        ...(l.serials.length && received[l.id] !== l.qty ? { receivedSerials: arrived[l.id] ?? [] } : {}),
+      })),
+    });
+  }
 
   return (
     <>
@@ -303,7 +370,7 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
             </Button>
           ) : null}
           {x.cancel ? (
-            <Button kind="ghost" onClick={() => setModal("cancel")} disabled={!!busy}>
+            <Button kind="danger" onClick={() => setModal("cancel")} disabled={!!busy}>
               Cancel entry
             </Button>
           ) : null}
@@ -314,11 +381,12 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
           ) : null}
           {e.status !== "DRAFT"
             ? allowedKinds(e.type).map((k) => (
-                <Button key={k} kind="secondary" onClick={() => print(k)} disabled={!!printing}>
-                  {printing === k ? "Preparing PDF…" : `PDF: ${DOCUMENT_TITLES[k]}`}
+                <Button key={k} kind="secondary" onClick={() => print(k)} disabled={!!pdf}>
+                  {`PDF: ${DOCUMENT_TITLES[k]}`}
                 </Button>
               ))
             : null}
+          <PdfViewer request={pdf} onClose={closePdf} />
         </div>
       </div>
 
@@ -517,14 +585,15 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
                 canUpload={x.editImportDocs}
                 removeRule={(a) => removeRule(caps, { status: e.status, warehouseId: e.warehouse.id }, a)}
                 warnings={importWarnings}
-                errors={docErrors}
+                errors={{ ...docErrors, ...docProblems }}
+                problems={docProblems}
                 layout="gallery"
                 onError={(message) => setNotice({ kind: "error", message })}
                 actions={
                   x.editImportDocs ? (
                     docDraft ? (
                       <>
-                        <Button kind="ghost" size="sm" onClick={() => (setDocDraft(null), setDocErrors({}))} disabled={docSaving}>
+                        <Button kind="ghost" size="sm" onClick={() => (setDocDraft(null), setDocErrors({}), setDocAttempt(false))} disabled={docSaving}>
                           Cancel
                         </Button>
                         <Button size="sm" onClick={saveDocs} disabled={docSaving}>
@@ -560,6 +629,11 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
                 <p className={styles.sectionHelp} style={{ margin: "var(--space-2) 0 var(--space-5)" }}>
                   Enter what actually arrived. Any shortfall goes to damaged stock at {e.toWarehouse?.code} with a write-off for verification.
                 </p>
+                {receiveAttempt ? (
+                  <div style={{ marginBottom: "var(--space-5)" }}>
+                    <FormProblems problems={receiveProblems} labels={receiveLabels} title={Object.keys(receiveProblems).length === 1 ? "1 thing to fix before confirming" : `${Object.keys(receiveProblems).length} things to fix before confirming`} />
+                  </div>
+                ) : null}
                 <table className={styles.lines}>
                   <thead>
                     <tr>
@@ -591,34 +665,26 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
                               })}
                             </div>
                           ) : null}
+                          {receiveErr(`serials:${l.id}`) ? <div className={styles.lineWarn}>{receiveErr(`serials:${l.id}`)}</div> : null}
                         </td>
                         <td className={`${styles.right} ${styles.num}`}>{formatQty(l.qty)}</td>
                         <td className={styles.right} style={{ width: 140 }}>
                           <input
-                            className={styles.cellInput}
+                            className={`${styles.cellInput} ${receiveErr(`qty:${l.id}`) ? styles.cellInputError : ""}`}
                             inputMode="decimal"
                             aria-label={`Received quantity of ${l.product.code}`}
+                            aria-invalid={receiveErr(`qty:${l.id}`) ? true : undefined}
                             value={received[l.id] ?? ""}
-                            onChange={(ev) => setReceived((r) => ({ ...r, [l.id]: ev.target.value }))}
+                            onChange={(ev) => setReceived((r) => ({ ...r, [l.id]: sanitize("qty", ev.target.value) }))}
                           />
+                          {receiveErr(`qty:${l.id}`) ? <div className={styles.lineWarn}>{receiveErr(`qty:${l.id}`)}</div> : null}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
                 <div style={{ marginTop: "var(--space-5)" }}>
-                  <Button
-                    onClick={() =>
-                      act("receive", {
-                        lines: e.lines.map((l) => ({
-                          lineId: l.id,
-                          receivedQty: received[l.id] || "0",
-                          ...(l.serials.length && received[l.id] !== l.qty ? { receivedSerials: arrived[l.id] ?? [] } : {}),
-                        })),
-                      })
-                    }
-                    disabled={!!busy}
-                  >
+                  <Button onClick={confirmReceipt} disabled={!!busy}>
                     {busy === "receive" ? "Receiving…" : "Confirm receipt"}
                   </Button>
                 </div>
@@ -705,14 +771,17 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
         primaryText="Reject"
         primaryKind="danger"
         submitting={busy === "reject"}
-        onClose={() => (setModal(null), setReasonError(undefined))}
+        onClose={closeReason}
         onSubmit={(ev) => {
           ev.preventDefault();
-          void act("reject", { reason }, "Rejected. The creator can fix and resubmit it.");
+          setReasonAttempt(true);
+          if (reasonProblem) return;
+          void act("reject", { reason: reason.trim() }, "Rejected. The creator can fix and resubmit it.");
         }}
       >
+        {reasonAttempt && reasonProblem ? <FormProblems problems={{ reason: reasonProblem }} labels={{ reason: "Reason" }} title="1 thing to fix before rejecting" /> : null}
         <p style={{ marginBottom: "var(--space-5)" }}>Any reserved stock is released. The creator sees your reason and can edit and resubmit.</p>
-        <TextAreaField label="Reason" rows={3} value={reason} onChange={(ev) => (setReason(ev.target.value), setReasonError(undefined))} error={reasonError} required />
+        <TextAreaField label="Reason" rows={3} value={reason} onChange={(ev) => (setReason(ev.target.value), setReasonError(undefined))} error={shownReasonError} helper="3–500 characters." required />
       </Modal>
 
       <Modal
@@ -722,16 +791,19 @@ export function EntryDetail({ caps, initial, saved }: { caps: StockCaps; initial
         primaryText="Reverse"
         primaryKind="danger"
         submitting={busy === "reverse"}
-        onClose={() => (setModal(null), setReasonError(undefined))}
+        onClose={closeReason}
         onSubmit={(ev) => {
           ev.preventDefault();
-          void act("reverse", { reason });
+          setReasonAttempt(true);
+          if (reasonProblem) return;
+          void act("reverse", { reason: reason.trim() });
         }}
       >
+        {reasonAttempt && reasonProblem ? <FormProblems problems={{ reason: reasonProblem }} labels={{ reason: "Reason" }} title="1 thing to fix before reversing" /> : null}
         <p style={{ marginBottom: "var(--space-5)" }}>
           A reversal entry undoes this entry&apos;s stock and cost exactly. It&apos;s refused if stock would go negative or if serial numbers have moved since. This can&apos;t be undone.
         </p>
-        <TextAreaField label="Reason" rows={3} value={reason} onChange={(ev) => (setReason(ev.target.value), setReasonError(undefined))} error={reasonError} required />
+        <TextAreaField label="Reason" rows={3} value={reason} onChange={(ev) => (setReason(ev.target.value), setReasonError(undefined))} error={shownReasonError} helper="3–500 characters." required />
       </Modal>
 
       <Modal
@@ -774,17 +846,51 @@ function LandedCostEditor({ entry, onSaved, onError }: { entry: EntryDto; onSave
     entry.charges.map((c) => ({ key: c.id, type: c.type as ChargeRow["type"], mode: c.mode as ChargeRow["mode"], value: "value" in c && c.value ? String(c.value) : "", includeInCost: c.includeInCost, label: c.label ?? "" })),
   );
   const [saving, setSaving] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
+  const [attempt, setAttempt] = useState(false);
+
+  // Same rules as the server's LandedCostSchema; rows without a value are left out when saving.
+  const sent = rows.filter((c) => c.value !== "");
+  const problems = collect(
+    ["exchangeRate", rules.rate(rate, { positive: true })],
+    ...rows.flatMap((c): [string, string | undefined][] => [
+      [`charge:${c.key}:value`, rules.rate(c.value)],
+      [`charge:${c.key}:label`, c.type === "OTHER" ? rules.maxLength(c.label, 100) : undefined],
+    ]),
+    ["charges", sent.length > 20 ? "Enter at most 20 charges." : undefined],
+  );
+  const errors: Record<string, string> = { ...serverErrors, ...(attempt ? problems : {}) };
+  const rowNo = (key: string) => rows.findIndex((r) => r.key === key) + 1;
+  const labels: Record<string, string> = {
+    exchangeRate: "Customs exchange rate",
+    charges: "Charges",
+    ...Object.fromEntries(rows.flatMap((c) => [[`charge:${c.key}:value`, `Charge ${rowNo(c.key)} value`] as const, [`charge:${c.key}:label`, `Charge ${rowNo(c.key)} label`] as const])),
+  };
+
+  // A server error disappears once the form is edited.
+  useEffect(() => setServerErrors({}), [rate, rows]);
 
   async function save() {
+    setAttempt(true);
+    if (Object.keys(problems).length) return;
     setSaving(true);
-    setErrors({});
+    setServerErrors({});
     try {
-      const body = { exchangeRate: rate || undefined, charges: rows.filter((c) => c.value !== "").map(({ key: _k, label, ...c }) => ({ ...c, label: label || null })) };
+      const body = { exchangeRate: rate.trim() || undefined, charges: sent.map(({ key: _k, label, ...c }) => ({ ...c, label: label.trim() || null })) };
       onSaved((await api<{ data: EntryDto }>(`/stock-entries/${entry.id}/landed-cost`, { method: "PUT", body })).data);
+      setAttempt(false);
     } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fieldErrors()).length) setErrors(err.fieldErrors());
-      else onError(errorMessage(err));
+      const fields = err instanceof ApiError ? err.fieldErrors() : {};
+      if (Object.keys(fields).length) {
+        // Server paths count only the rows that were sent (charges.<n>.<field>): map them back to the rows on screen.
+        const mapped: Record<string, string> = {};
+        for (const [path, message] of Object.entries(fields)) {
+          const m = /^charges\.(\d+)\.(value|label)/.exec(path);
+          const row = m ? sent[Number(m[1])] : undefined;
+          mapped[row ? `charge:${row.key}:${m![2]}` : path.startsWith("charges") ? "charges" : path] = message;
+        }
+        setServerErrors(mapped);
+      } else onError(errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -803,8 +909,13 @@ function LandedCostEditor({ entry, onSaved, onError }: { entry: EntryDto; onSave
           + Add charge
         </Button>
       </div>
+      {attempt && Object.keys(problems).length ? (
+        <div style={{ marginBottom: "var(--space-5)" }}>
+          <FormProblems problems={problems} labels={labels} />
+        </div>
+      ) : null}
       <div className={styles.grid} style={{ marginBottom: "var(--space-5)" }}>
-        <TextField label={`Customs exchange rate (৳ per ${entry.currency})`} inputMode="decimal" value={rate} onChange={(ev) => setRate(ev.target.value)} error={errors.exchangeRate} />
+        <TextField label={`Customs exchange rate (৳ per ${entry.currency})`} kind="rate" value={rate} onChange={(ev) => setRate(ev.target.value)} error={errors.exchangeRate} />
       </div>
       {rows.length ? (
         <div className={styles.linesWrap}>
@@ -833,7 +944,18 @@ function LandedCostEditor({ entry, onSaved, onError }: { entry: EntryDto; onSave
                           </option>
                         ))}
                       </Select>
-                      {c.type === "OTHER" ? <input className={styles.cellInput} style={{ marginTop: "var(--space-2)" }} aria-label="Charge label" placeholder="Label" value={c.label} onChange={(ev) => upd({ label: ev.target.value })} /> : null}
+                      {c.type === "OTHER" ? (
+                        <input
+                          className={`${styles.cellInput} ${errors[`charge:${c.key}:label`] ? styles.cellInputError : ""}`}
+                          style={{ marginTop: "var(--space-2)" }}
+                          aria-label="Charge label"
+                          aria-invalid={errors[`charge:${c.key}:label`] ? true : undefined}
+                          placeholder="Label"
+                          value={c.label}
+                          onChange={(ev) => upd({ label: ev.target.value })}
+                        />
+                      ) : null}
+                      {errors[`charge:${c.key}:label`] ? <div className={styles.lineWarn}>{errors[`charge:${c.key}:label`]}</div> : null}
                     </td>
                     <td>
                       <Select className={styles.cellInput} aria-label={`Charge basis ${i + 1}`} value={c.mode} onChange={(ev) => upd({ mode: ev.target.value as ChargeRow["mode"] })}>
@@ -842,7 +964,15 @@ function LandedCostEditor({ entry, onSaved, onError }: { entry: EntryDto; onSave
                       </Select>
                     </td>
                     <td className={styles.right}>
-                      <input className={styles.cellInput} inputMode="decimal" aria-label={`Charge value ${i + 1}`} value={c.value} onChange={(ev) => upd({ value: ev.target.value })} />
+                      <input
+                        className={`${styles.cellInput} ${errors[`charge:${c.key}:value`] ? styles.cellInputError : ""}`}
+                        inputMode="decimal"
+                        aria-label={`Charge value ${i + 1}`}
+                        aria-invalid={errors[`charge:${c.key}:value`] ? true : undefined}
+                        value={c.value}
+                        onChange={(ev) => upd({ value: sanitize("rate", ev.target.value) })}
+                      />
+                      {errors[`charge:${c.key}:value`] ? <div className={styles.lineWarn}>{errors[`charge:${c.key}:value`]}</div> : null}
                     </td>
                     <td>
                       <Checkbox label="In cost" checked={c.includeInCost} onChange={(ev) => upd({ includeInCost: ev.target.checked })} />

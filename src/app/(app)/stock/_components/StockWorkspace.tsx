@@ -23,9 +23,11 @@ interface Props {
   /** ?po=: open the new-entry form receiving against this purchase order. */
   initialPoId?: string;
   prefill?: { type?: EntryType; projectId?: string; warehouseId?: string };
+  /** ?status= and ?mine=1: initial filters of the Entries tab. */
+  entryFilter?: { status?: string; mine?: boolean };
 }
 
-export function StockWorkspace({ caps, warehouses, initialTab, defaultVat, requiredDocs, initialPoId, prefill }: Props) {
+export function StockWorkspace({ caps, warehouses, initialTab, defaultVat, requiredDocs, initialPoId, prefill, entryFilter }: Props) {
   const [tab, setTab] = useState<StockTab>(initialTab);
   const [pending, setPending] = useState<number | null>(null);
   const [incoming, setIncoming] = useState<EntryDto[]>([]);
@@ -80,7 +82,7 @@ export function StockWorkspace({ caps, warehouses, initialTab, defaultVat, requi
       <Tabs items={items} selected={selected} onChange={change} label="Stock" />
       <div className={styles.tabPanel}>
         {selected === "new" ? <EntryForm caps={caps} warehouses={warehouses} defaultVat={defaultVat} requiredDocs={requiredDocs} initialPoId={initialPoId} prefill={prefill} /> : null}
-        {selected === "entries" ? <EntryList caps={caps} warehouses={warehouses} mode="all" /> : null}
+        {selected === "entries" ? <EntryList caps={caps} warehouses={warehouses} mode="all" initialStatus={entryFilter?.status} initialMine={entryFilter?.mine} /> : null}
         {selected === "pending" ? <EntryList caps={caps} warehouses={warehouses} mode="pending" onCount={onCount} /> : null}
         {selected === "levels" ? <StockLevels caps={caps} warehouses={warehouses} /> : null}
       </div>

@@ -4,8 +4,11 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { SelectField, TextAreaField, TextField } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Notification } from "@/components/ui/Notification";
 import { api, ApiError, errorMessage } from "@/lib/api-client";
+import { collect, revealProblems, rules, sanitize, type Problems } from "@/lib/validation";
+import { poTotals } from "@/modules/purchasing/domain/rules";
 import { formatMoney } from "@/shared/time/format";
 import { ProductPicker } from "../../stock/_components/ProductPicker";
 import { formatAmount, newKey, type ProductOption, type WarehouseDto } from "../../stock/_components/types";
@@ -39,6 +42,31 @@ const emptyLine = (): Line => ({ key: `p${++lineSeq}`, product: null, qty: "", u
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" }).format(new Date());
 const trimZeros = (v: string) => (v.includes(".") ? v.replace(/\.?0+$/, "") : v);
 const nul = (v: string | undefined) => (v && v.trim() ? v.trim() : null);
+
+type Action = "draft" | "submit" | "approve";
+
+/** Unit prices / exchange rates (Price4Schema): up to 10 digits and 4 decimals. */
+export const price4 = (v: string | null | undefined, positive = false) =>
+  rules.rate(v, { positive }) ?? (v && v.trim().replace(/,/g, "").split(".")[0]!.length > 10 ? "Use at most 10 digits before the decimal point." : undefined);
+
+/** Two-decimal amount strings ("1500.00") compared exactly, without floats. */
+const cents = (v: string) => BigInt(v.replace(".", ""));
+
+const LABELS: Record<string, string> = {
+  supplierId: "Supplier",
+  supplierQuoteRef: "Supplier quote ref.",
+  poDate: "PO date",
+  expectedDeliveryDate: "Expected delivery",
+  deliverToWarehouseId: "Deliver to warehouse",
+  projectId: "Project",
+  exchangeRate: "Exchange rate",
+  discountAmount: "Discount",
+  vatPercent: "VAT %",
+  terms: "Terms & conditions",
+  notes: "Internal notes",
+  lines: "Products",
+};
+const LINE_FIELD: Record<string, string> = { product: "product", qty: "quantity", unitPrice: "unit price", note: "note" };
 
 function fromPo(po: PoDetailDto): { header: Header; lines: Line[] } {
   return {
@@ -97,7 +125,10 @@ export function PoForm({ caps, warehouses, defaults, po, initialSupplierId }: Pr
   const [suppliers, setSuppliers] = useState<SupplierDto[]>([]);
   const [projects, setProjects] = useState<{ id: string; code: string; name: string }[]>([]);
   const [calc, setCalc] = useState<Calc | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  // Field errors from the server; line errors are keyed `line:<line key>:<field>`.
+  const [serverErrors, setErrors] = useState<Record<string, string>>({});
+  // The last save the user tried: from then on the form checks itself live and marks what's wrong.
+  const [attempt, setAttempt] = useState<Action | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const keyRef = useRef(newKey());
@@ -143,10 +174,83 @@ export function PoForm({ caps, warehouses, defaults, po, initialSupplierId }: Pr
 
   const updateLine = (key: string, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
-  async function save(action: "draft" | "submit" | "approve") {
+  // Server field errors describe the form as it was sent: drop them once the user edits it
+  // (the live check below keeps marking whatever is still wrong).
+  useEffect(() => {
+    setErrors((e) => (Object.keys(e).length ? {} : e));
+  }, [header, lines]);
+
+  /** Local POs: the discount can't be more than the subtotal (same rounding as the server). */
+  function discountOver(): string | undefined {
+    const discount = header.discountAmount?.trim().replace(/,/g, "");
+    const sent = lines.filter((l) => l.product).map((l) => ({ qty: l.qty.trim() || "0", unitPrice: l.unitPrice.trim() || "0" }));
+    if (!discount || !/[1-9]/.test(discount) || !sent.length || sent.some((l) => rules.qty(l.qty) || price4(l.unitPrice))) return undefined;
+    const t = poTotals({ type: "LOCAL", lines: sent, discountAmount: discount, vatPercent: "0", exchangeRate: "1" });
+    return cents(t.discountAmount) > cents(t.subtotal) ? "The discount can't be more than the subtotal." : undefined;
+  }
+
+  /**
+   * What is missing or wrong, checked in the browser so the user sees every problem at once
+   * (the server stops at the first). A draft needs a supplier, warehouse, products and valid
+   * numbers; submitting or approving also needs unit prices above 0 and (imported) the rate.
+   */
+  function check(action: Action): Problems {
+    const full = action !== "draft";
+    const out = collect(
+      ["supplierId", rules.chosen(header.supplierId, "a supplier")],
+      ["supplierQuoteRef", rules.maxLength(header.supplierQuoteRef, 100)],
+      ["expectedDeliveryDate", rules.notBefore(header.expectedDeliveryDate, header.poDate || today(), "Expected delivery can't be before the PO date.")],
+      ["deliverToWarehouseId", rules.chosen(header.deliverToWarehouseId, "the warehouse to deliver to")],
+      ["exchangeRate", imported ? (price4(header.exchangeRate, true) ?? (full && !header.exchangeRate?.trim() ? "Enter the exchange rate (needed to submit or approve)." : undefined)) : undefined],
+      ["discountAmount", imported ? undefined : (rules.money(header.discountAmount) ?? discountOver())],
+      ["vatPercent", imported ? undefined : rules.percent(header.vatPercent)],
+      ["terms", rules.maxLength(header.terms, 5000)],
+      ["notes", rules.maxLength(header.notes, 2000)],
+    );
+    const firstLine = new Map<string, number>();
+    lines.forEach((l, i) => {
+      const k = (f: string) => `line:${l.key}:${f}`;
+      if (!l.product) {
+        if (l.qty.trim() || l.unitPrice.trim() || l.note.trim()) out[k("product")] = "Choose a product, or remove the line.";
+        return;
+      }
+      const seen = firstLine.get(l.product.id);
+      if (seen !== undefined) out[k("product")] = `Already on line ${seen + 1}. Use one line with the total quantity.`;
+      else firstLine.set(l.product.id, i);
+      const qty = rules.required(l.qty, "a quantity") ?? rules.qty(l.qty, { positive: true });
+      if (qty) out[k("qty")] = qty;
+      const price = price4(l.unitPrice, full) ?? (full && !l.unitPrice.trim() ? "Enter a unit price greater than 0." : undefined);
+      if (price) out[k("unitPrice")] = price;
+      const note = rules.maxLength(l.note, 500);
+      if (note) out[k("note")] = note;
+    });
+    if (!lines.some((l) => l.product)) out.lines = "Add at least one product.";
+    else if (lines.filter((l) => l.product).length > 200) out.lines = "A PO can have at most 200 products.";
+    return out;
+  }
+
+  /** Server paths `lines.<n>.<field>` count only lines with a product; map them to the rows on screen. */
+  function mapServerErrors(fieldErrors: Record<string, string>): Record<string, string> {
+    const sent = lines.filter((l) => l.product);
+    const out: Record<string, string> = {};
+    for (const [path, message] of Object.entries(fieldErrors)) {
+      const m = /^lines\.(\d+)(?:\.(\w+))?/.exec(path);
+      const line = m ? sent[Number(m[1])] : undefined;
+      if (line) out[`line:${line.key}:${m![2] === "qty" || m![2] === "unitPrice" || m![2] === "note" ? m![2] : "product"}`] = message;
+      else out[path] = message;
+    }
+    return out;
+  }
+
+  async function save(action: Action) {
+    setAttempt(action);
+    setFormError(null);
+    if (Object.keys(check(action)).length) {
+      revealProblems();
+      return;
+    }
     setSaving(action);
     setErrors({});
-    setFormError(null);
     const body = payload();
     try {
       let id: string;
@@ -161,15 +265,23 @@ export function PoForm({ caps, warehouses, defaults, po, initialSupplierId }: Pr
       router.refresh();
     } catch (err) {
       keyRef.current = newKey();
-      if (err instanceof ApiError) {
-        setErrors(err.fieldErrors());
-        setFormError(err.message);
-      } else setFormError(errorMessage(err));
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      const fields = err instanceof ApiError ? mapServerErrors(err.fieldErrors()) : {};
+      setErrors(fields);
+      // Field problems are marked on the fields; only say something general when there are none.
+      setFormError(Object.keys(fields).length ? "Some details need fixing. The fields are marked in red below." : errorMessage(err));
+      revealProblems();
     } finally {
       setSaving(null);
     }
   }
+
+  const problems = attempt ? check(attempt) : {};
+  const errors: Record<string, string> = { ...serverErrors, ...problems };
+  const lineError = (l: Line, f: string) => errors[`line:${l.key}:${f}`];
+  const labels: Record<string, string> = { ...LABELS };
+  lines.forEach((l, i) => {
+    for (const [f, name] of Object.entries(LINE_FIELD)) labels[`line:${l.key}:${f}`] = `Line ${i + 1} ${name}`;
+  });
 
   const t = calc?.totals;
   const canApprove = calc?.approvalMode === "CAN_APPROVE" && (!po || po.createdBy.id !== caps.userId || caps.canFull);
@@ -182,6 +294,7 @@ export function PoForm({ caps, warehouses, defaults, po, initialSupplierId }: Pr
           {formError}
         </Notification>
       ) : null}
+      <FormProblems problems={problems} labels={labels} />
       {po?.status === "REJECTED" && po.rejectionReason ? (
         <Notification kind="warning" title={`Rejected by ${po.rejectedBy?.name ?? "approver"}`}>
           {po.rejectionReason} — fix it and submit again.
@@ -190,7 +303,7 @@ export function PoForm({ caps, warehouses, defaults, po, initialSupplierId }: Pr
 
       <Step n={1} id="po-supplier" title="Supplier" aside={calc ? <span className={styles.muted}>Number on submit: <span className={styles.mono}>{po?.number ?? calc.nextNumber}</span></span> : null}>
         <div className={styles.grid}>
-          <SelectField
+          <SelectField searchable
             label="Supplier"
             value={header.supplierId}
             onChange={(e) => set("supplierId", e.target.value)}
@@ -213,14 +326,14 @@ export function PoForm({ caps, warehouses, defaults, po, initialSupplierId }: Pr
 
       <Step n={2} id="po-delivery" title="Delivery">
         <div className={styles.grid}>
-          <SelectField label="Deliver to warehouse" value={header.deliverToWarehouseId ?? ""} onChange={(e) => set("deliverToWarehouseId", e.target.value)} error={errors.deliverToWarehouseId}>
+          <SelectField searchable label="Deliver to warehouse" value={header.deliverToWarehouseId ?? ""} onChange={(e) => set("deliverToWarehouseId", e.target.value)} error={errors.deliverToWarehouseId}>
             {myWarehouses.map((w) => (
               <option key={w.id} value={w.id}>
                 {w.name}
               </option>
             ))}
           </SelectField>
-          <SelectField label="Project (optional)" value={header.projectId ?? ""} onChange={(e) => set("projectId", e.target.value)} error={errors.projectId} helper="For goods bought for a specific project.">
+          <SelectField searchable label="Project (optional)" value={header.projectId ?? ""} onChange={(e) => set("projectId", e.target.value)} error={errors.projectId} helper="For goods bought for a specific project.">
             <option value="">None</option>
             {projects.map((x) => (
               <option key={x.id} value={x.id}>
@@ -259,7 +372,9 @@ export function PoForm({ caps, warehouses, defaults, po, initialSupplierId }: Pr
                           const cost = (prod as (ProductOption & { purchaseCost?: string }) | null)?.purchaseCost;
                           updateLine(l.key, { product: prod, unitPrice: l.unitPrice || (!imported && cost && Number(cost) > 0 ? trimZeros(cost) : "") });
                         }}
+                        invalid={!!lineError(l, "product") || (!!errors.lines && i === 0 && !l.product)}
                       />
+                      {lineError(l, "product") ? <div className={styles.lineWarn}>{lineError(l, "product")}</div> : null}
                       {warn?.map((w) => (
                         <div key={w.code} className={styles.lineWarn}>
                           {w.message}
@@ -267,15 +382,39 @@ export function PoForm({ caps, warehouses, defaults, po, initialSupplierId }: Pr
                       ))}
                     </td>
                     <td className={styles.right}>
-                      <input className={styles.cellInput} inputMode="decimal" aria-label={`Quantity, line ${i + 1}`} value={l.qty} onChange={(e) => updateLine(l.key, { qty: e.target.value })} />
-                      {l.product ? <div className={styles.lineMeta}>{l.product.unit.code}</div> : null}
+                      <input
+                        className={`${styles.cellInput} ${lineError(l, "qty") ? styles.cellInputError : ""}`}
+                        inputMode="decimal"
+                        autoComplete="off"
+                        aria-label={`Quantity, line ${i + 1}`}
+                        aria-invalid={lineError(l, "qty") ? true : undefined}
+                        value={l.qty}
+                        onChange={(e) => updateLine(l.key, { qty: sanitize("qty", e.target.value) })}
+                      />
+                      {lineError(l, "qty") ? <div className={styles.lineWarn}>{lineError(l, "qty")}</div> : l.product ? <div className={styles.lineMeta}>{l.product.unit.code}</div> : null}
                     </td>
                     <td className={styles.right}>
-                      <input className={styles.cellInput} inputMode="decimal" aria-label={`${priceLabel}, line ${i + 1}`} value={l.unitPrice} onChange={(e) => updateLine(l.key, { unitPrice: e.target.value })} />
+                      <input
+                        className={`${styles.cellInput} ${lineError(l, "unitPrice") ? styles.cellInputError : ""}`}
+                        inputMode="decimal"
+                        autoComplete="off"
+                        aria-label={`${priceLabel}, line ${i + 1}`}
+                        aria-invalid={lineError(l, "unitPrice") ? true : undefined}
+                        value={l.unitPrice}
+                        onChange={(e) => updateLine(l.key, { unitPrice: sanitize("rate", e.target.value) })}
+                      />
+                      {lineError(l, "unitPrice") ? <div className={styles.lineWarn}>{lineError(l, "unitPrice")}</div> : null}
                     </td>
                     {caps.seeCost ? <td className={`${styles.right} ${styles.num}`}>{l.product && c?.amount ? formatAmount(c.amount, currency) : "—"}</td> : null}
                     <td>
-                      <input className={styles.cellInput} aria-label={`Note, line ${i + 1}`} value={l.note} onChange={(e) => updateLine(l.key, { note: e.target.value })} />
+                      <input
+                        className={`${styles.cellInput} ${lineError(l, "note") ? styles.cellInputError : ""}`}
+                        aria-label={`Note, line ${i + 1}`}
+                        aria-invalid={lineError(l, "note") ? true : undefined}
+                        value={l.note}
+                        onChange={(e) => updateLine(l.key, { note: e.target.value })}
+                      />
+                      {lineError(l, "note") ? <div className={styles.lineWarn}>{lineError(l, "note")}</div> : null}
                     </td>
                     <td>
                       <Button kind="ghost" size="sm" aria-label={`Remove line ${i + 1}`} onClick={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [emptyLine()]))}>
@@ -301,7 +440,7 @@ export function PoForm({ caps, warehouses, defaults, po, initialSupplierId }: Pr
             {imported ? (
               <TextField
                 label={`Exchange rate (৳ per ${currency})`}
-                inputMode="decimal"
+                kind="rate"
                 value={header.exchangeRate ?? ""}
                 onChange={(e) => set("exchangeRate", e.target.value)}
                 error={errors.exchangeRate}
@@ -310,8 +449,8 @@ export function PoForm({ caps, warehouses, defaults, po, initialSupplierId }: Pr
               />
             ) : (
               <>
-                <TextField label="Discount (৳)" inputMode="decimal" value={header.discountAmount ?? ""} onChange={(e) => set("discountAmount", e.target.value)} error={errors.discountAmount} />
-                <TextField label="VAT %" inputMode="decimal" value={header.vatPercent ?? ""} onChange={(e) => set("vatPercent", e.target.value)} error={errors.vatPercent} />
+                <TextField label="Discount (৳)" kind="money" value={header.discountAmount ?? ""} onChange={(e) => set("discountAmount", e.target.value)} error={errors.discountAmount} />
+                <TextField label="VAT %" kind="percent" value={header.vatPercent ?? ""} onChange={(e) => set("vatPercent", e.target.value)} error={errors.vatPercent} />
               </>
             )}
             <TextAreaField label="Terms & conditions" rows={5} value={header.terms ?? ""} onChange={(e) => set("terms", e.target.value)} error={errors.terms} fieldClassName={styles.full} helper="Printed on the PO." />

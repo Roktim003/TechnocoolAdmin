@@ -9,9 +9,15 @@ import { Notification } from "@/components/ui/Notification";
 import { Tabs } from "@/components/ui/Tabs";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, errorMessage } from "@/lib/api-client";
+import { collect, rules } from "@/lib/validation";
 import styles from "./catalog.module.css";
 
 type Kind = "catalogs" | "categories" | "units";
+
+// Same limits as the server (catalog dto.ts: RefName max 60; UNIT_CODE_PATTERN after trim + lower-case).
+const NAME_MAX = 60;
+const UNIT_CODE = /^[a-z][a-z0-9.]{0,9}$/;
+const nameProblem = (v: string) => rules.required(v, "a name") ?? rules.maxLength(v, NAME_MAX);
 
 interface Row {
   id: string;
@@ -33,8 +39,26 @@ function RefTable({ kind, onNotice }: { kind: Kind; onNotice: (n: { kind: "succe
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [addAttempt, setAddAttempt] = useState(false);
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
+  const [renameAttempt, setRenameAttempt] = useState(false);
+  const [renameServerError, setRenameServerError] = useState<string>();
   const [busy, setBusy] = useState(false);
+
+  // Browser-side checks, re-checked live after the first attempt.
+  const addProblems = collect(
+    ["code", cfg.hasCode ? (rules.required(code, "a code") ?? (UNIT_CODE.test(code.trim()) ? undefined : "Use 1–10 lower-case letters, digits or dots, starting with a letter.")) : undefined],
+    ["name", nameProblem(name)],
+  );
+  const addErrors: Record<string, string | undefined> = { ...errors, ...(addAttempt ? addProblems : {}) };
+  const renameProblem = editing ? nameProblem(editing.name) : undefined;
+  const renameError = renameServerError ?? (renameAttempt ? renameProblem : undefined);
+
+  const startRename = (r: Row | null) => {
+    setEditing(r ? { id: r.id, name: r.name } : null);
+    setRenameAttempt(false);
+    setRenameServerError(undefined);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -49,7 +73,8 @@ function RefTable({ kind, onNotice }: { kind: Kind; onNotice: (n: { kind: "succe
     void load();
   }, [load]);
 
-  async function run(action: () => Promise<unknown>, success: string) {
+  /** Runs an action; server field errors go to `onFieldErrors` (when given) instead of a general notice. */
+  async function run(action: () => Promise<unknown>, success: string, onFieldErrors?: (fields: Record<string, string>) => void) {
     setBusy(true);
     try {
       await action();
@@ -57,8 +82,9 @@ function RefTable({ kind, onNotice }: { kind: Kind; onNotice: (n: { kind: "succe
       await load();
       return true;
     } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fieldErrors()).length) setErrors(err.fieldErrors());
-      onNotice({ kind: "error", title: "Could not save", message: errorMessage(err) });
+      const fields = err instanceof ApiError ? err.fieldErrors() : {};
+      if (onFieldErrors && Object.keys(fields).length) onFieldErrors(fields);
+      else onNotice({ kind: "error", title: "Could not save", message: errorMessage(err) });
       return false;
     } finally {
       setBusy(false);
@@ -66,16 +92,23 @@ function RefTable({ kind, onNotice }: { kind: Kind; onNotice: (n: { kind: "succe
   }
 
   async function add() {
-    const e: Record<string, string> = {};
-    if (!name.trim()) e.name = "Enter a name.";
-    if (cfg.hasCode && !/^[a-zA-Z][a-zA-Z0-9.]{0,9}$/.test(code.trim())) e.code = "1–10 letters/digits, starting with a letter.";
-    setErrors(e);
-    if (Object.keys(e).length) return;
-    const ok = await run(() => api(`/${kind}`, { method: "POST", body: cfg.hasCode ? { code: code.trim(), name: name.trim() } : { name: name.trim() } }), `${name.trim()} added`);
+    setAddAttempt(true);
+    setErrors({});
+    if (Object.keys(addProblems).length) return;
+    const ok = await run(() => api(`/${kind}`, { method: "POST", body: cfg.hasCode ? { code: code.trim(), name: name.trim() } : { name: name.trim() } }), `${name.trim()} added`, setErrors);
     if (ok) {
       setName("");
       setCode("");
+      setAddAttempt(false);
     }
+  }
+
+  async function rename(id: string) {
+    setRenameAttempt(true);
+    setRenameServerError(undefined);
+    if (!editing || renameProblem) return;
+    const ok = await run(() => api(`/${kind}/${id}`, { method: "PATCH", body: { name: editing.name.trim() } }), "Renamed", (fields) => setRenameServerError(fields.name ?? Object.values(fields)[0]));
+    if (ok) startRename(null);
   }
 
   const columns: Column<Row>[] = [
@@ -87,16 +120,26 @@ function RefTable({ kind, onNotice }: { kind: Kind; onNotice: (n: { kind: "succe
         editing?.id === r.id ? (
           <form
             className={styles.inlineAdd}
+            noValidate
             onSubmit={(e) => {
               e.preventDefault();
-              void run(() => api(`/${kind}/${r.id}`, { method: "PATCH", body: { name: editing.name } }), "Renamed").then((ok) => ok && setEditing(null));
+              void rename(r.id);
             }}
           >
-            <TextField label={<span className="visually-hidden">New name</span>} value={editing.name} onChange={(e) => setEditing({ id: r.id, name: e.target.value })} autoFocus />
+            <TextField
+              label={<span className="visually-hidden">New name</span>}
+              value={editing.name}
+              onChange={(e) => {
+                setEditing({ id: r.id, name: e.target.value });
+                setRenameServerError(undefined);
+              }}
+              error={renameError}
+              autoFocus
+            />
             <Button type="submit" size="sm" disabled={busy}>
               Save
             </Button>
-            <Button kind="ghost" size="sm" onClick={() => setEditing(null)}>
+            <Button kind="ghost" size="sm" onClick={() => startRename(null)}>
               Cancel
             </Button>
           </form>
@@ -112,7 +155,7 @@ function RefTable({ kind, onNotice }: { kind: Kind; onNotice: (n: { kind: "succe
       align: "end",
       render: (r) => (
         <div className={styles.detailActions}>
-          <Button kind="ghost" size="sm" onClick={() => setEditing({ id: r.id, name: r.name })} disabled={busy}>
+          <Button kind="ghost" size="sm" onClick={() => startRename(r)} disabled={busy}>
             Rename
           </Button>
           <Button
@@ -150,13 +193,36 @@ function RefTable({ kind, onNotice }: { kind: Kind; onNotice: (n: { kind: "succe
       toolbar={
         <form
           className={styles.addRow}
+          noValidate
           onSubmit={(e) => {
             e.preventDefault();
             void add();
           }}
         >
-          {cfg.hasCode ? <TextField label="Code" value={code} onChange={(e) => setCode(e.target.value.toLowerCase())} error={errors.code} mono placeholder="pair" /> : null}
-          <TextField label={`New ${cfg.singular}`} value={name} onChange={(e) => setName(e.target.value)} error={errors.name} placeholder={kind === "catalogs" ? "e.g. Gree" : kind === "categories" ? "e.g. Ventilation fan" : "e.g. Pair"} />
+          {cfg.hasCode ? (
+            <TextField
+              label="Code"
+              value={code}
+              onChange={(e) => {
+                setCode(e.target.value.toLowerCase());
+                setErrors({});
+              }}
+              error={addErrors.code}
+              mono
+              spellCheck={false}
+              maxLength={10}
+              placeholder="pair"
+            />
+          ) : null}
+          <TextField
+            label={`New ${cfg.singular}`}
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setErrors({});
+            }}
+            error={addErrors.name}
+            placeholder={kind === "catalogs" ? "e.g. Gree" : kind === "categories" ? "e.g. Ventilation fan" : "e.g. Pair"} />
           <Button type="submit" disabled={busy}>
             Add {cfg.singular}
           </Button>

@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Checkbox, TextAreaField, TextField } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Pagination } from "@/components/ui/Pagination";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, errorMessage, type Page } from "@/lib/api-client";
+import { collect, revealProblems, rules, type Problems } from "@/lib/validation";
 import type { CustomerDto } from "../stock/_components/types";
 import styles from "../stock/_components/stock.module.css";
 
@@ -22,6 +24,10 @@ interface Config {
   empty: (r?: Row) => Form;
   fields: (f: Form, set: (k: string, v: string) => void, errors: Record<string, string>, editing: boolean) => ReactNode;
   toBody: (f: Form) => Record<string, unknown>;
+  /** Browser-side checks mirroring the server DTO; every problem is shown at once. */
+  check: (f: Form) => Problems;
+  /** Field names for the problem summary. */
+  labels: Record<string, string>;
 }
 
 const nul = (v: string | undefined) => (v && v.trim() ? v.trim() : null);
@@ -31,12 +37,21 @@ function configs(): Record<TabKey, Config> {
   const contact = (f: Form, set: (k: string, v: string) => void, errors: Record<string, string>) => (
     <>
       <TextField label="Contact person" value={f.contactPerson ?? ""} onChange={(e) => set("contactPerson", e.target.value)} error={errors.contactPerson} />
-      <TextField label="Phone" value={f.phone ?? ""} onChange={(e) => set("phone", e.target.value)} error={errors.phone} />
-      <TextField label="Email" type="email" value={f.email ?? ""} onChange={(e) => set("email", e.target.value)} error={errors.email} />
+      <TextField label="Phone" kind="phone" placeholder="e.g. 01711-000000" value={f.phone ?? ""} onChange={(e) => set("phone", e.target.value)} error={errors.phone} />
+      {/* Not type="email": the Modal form has no noValidate, so the browser's own check would hide ours. */}
+      <TextField label="Email" inputMode="email" autoComplete="email" spellCheck={false} placeholder="name@company.com" value={f.email ?? ""} onChange={(e) => set("email", e.target.value)} error={errors.email} />
       <TextAreaField label="Address" rows={2} value={f.address ?? ""} onChange={(e) => set("address", e.target.value)} error={errors.address} fieldClassName={styles.full} />
     </>
   );
   const contactBody = (f: Form) => ({ contactPerson: nul(f.contactPerson), phone: nul(f.phone), email: nul(f.email), address: nul(f.address) });
+  // Same limits as the server's customerShape (inventory dto.ts): contactPerson 100, phone 30, email 200, address 300.
+  const contactChecks = (f: Form): [string, string | undefined][] => [
+    ["contactPerson", rules.maxLength(f.contactPerson, 100)],
+    ["phone", rules.phone(f.phone)],
+    ["email", rules.email(f.email)],
+    ["address", rules.maxLength(f.address, 300)],
+  ];
+  const contactLabels = { contactPerson: "Contact person", phone: "Phone", email: "Email", address: "Address" };
   const contactOf = (r?: Row) => {
     const c = r as CustomerDto | undefined;
     return { contactPerson: c?.contactPerson ?? "", phone: c?.phone ?? "", email: c?.email ?? "", address: c?.address ?? "" };
@@ -53,11 +68,13 @@ function configs(): Record<TabKey, Config> {
       empty: (r) => ({ name: r?.name ?? "", ...contactOf(r) }),
       fields: (f, set, errors) => (
         <>
-          <TextField label="Name" value={f.name ?? ""} onChange={(e) => set("name", e.target.value)} error={errors.name} required fieldClassName={styles.full} />
+          <TextField label="Name *" value={f.name ?? ""} onChange={(e) => set("name", e.target.value)} error={errors.name} aria-required="true" fieldClassName={styles.full} />
           {contact(f, set, errors)}
         </>
       ),
       toBody: (f) => ({ name: f.name?.trim(), ...contactBody(f) }),
+      check: (f) => collect(["name", rules.required(f.name, "the customer's name") ?? rules.maxLength(f.name, 150)], ...contactChecks(f)),
+      labels: { name: "Name", ...contactLabels },
     },
   };
 }
@@ -79,7 +96,12 @@ function MasterTab({ path, config, canManage }: { path: TabKey; config: Config; 
   const [editing, setEditing] = useState<Row | "new" | null>(null);
   const [form, setForm] = useState<Form>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const problems = editing ? config.check(form) : {};
+  const shownErrors = { ...errors, ...(attempt ? problems : {}) };
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -108,10 +130,19 @@ function MasterTab({ path, config, canManage }: { path: TabKey; config: Config; 
     setEditing(r);
     setForm(config.empty(r === "new" ? undefined : r));
     setErrors({});
+    setFormError(null);
+    setAttempt(false);
   };
 
   async function save() {
+    setAttempt(true);
+    setFormError(null);
+    if (Object.keys(problems).length) {
+      revealProblems();
+      return;
+    }
     setSaving(true);
+    setErrors({});
     try {
       const body = config.toBody(form);
       if (editing === "new") await api(`/${path}`, { method: "POST", body });
@@ -120,8 +151,10 @@ function MasterTab({ path, config, canManage }: { path: TabKey; config: Config; 
       setEditing(null);
       await load();
     } catch (err) {
-      if (err instanceof ApiError) setErrors(err.fieldErrors());
-      if (!(err instanceof ApiError) || !Object.keys(err.fieldErrors()).length) setNotice({ kind: "error", message: errorMessage(err) });
+      const fields = err instanceof ApiError ? err.fieldErrors() : {};
+      setErrors(fields);
+      // Field problems are marked on the fields; only say something general when there are none.
+      setFormError(Object.keys(fields).length ? "Some details need fixing. The fields are marked in red below." : errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -181,7 +214,24 @@ function MasterTab({ path, config, canManage }: { path: TabKey; config: Config; 
           void save();
         }}
       >
-        <div className={styles.grid}>{config.fields(form, (k, v) => setForm((f) => ({ ...f, [k]: v })), errors, editing !== "new")}</div>
+        {formError ? (
+          <Notification kind="error" title={`Couldn't save the ${config.noun}`} onClose={() => setFormError(null)}>
+            {formError}
+          </Notification>
+        ) : null}
+        {attempt ? <FormProblems problems={problems} labels={config.labels} /> : null}
+        <div className={styles.grid}>
+          {config.fields(
+            form,
+            (k, v) => {
+              setForm((f) => ({ ...f, [k]: v }));
+              // A server error on a field disappears once the form is edited.
+              setErrors({});
+            },
+            shownErrors,
+            editing !== "new",
+          )}
+        </div>
         {editing && editing !== "new" ? (
           <div style={{ marginTop: "var(--space-6)" }}>
             <Button kind={editing.isActive ? "danger" : "secondary"} size="sm" onClick={() => toggleActive(editing)}>

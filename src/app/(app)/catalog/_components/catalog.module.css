@@ -752,6 +752,20 @@ a.nameCell:hover {
   background: var(--surface-2);
 }
 
+/* Catalog settings: tinted so it stands out from Export / Import (it's where brands and categories are managed). */
+.settingsLink {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.settingsLink:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
 .primaryLink:focus-visible,
 .secondaryLink:focus-visible {
   outline: 2px solid var(--accent);

@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Checkbox, FieldGroup, SelectField, TextField } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Modal } from "@/components/ui/Modal";
 import { Notification } from "@/components/ui/Notification";
 import { Tag } from "@/components/ui/Tag";
 import { api, ApiError, errorMessage } from "@/lib/api-client";
+import { collect, rules } from "@/lib/validation";
 import { FLAG_LABELS, MODULE_KEYS, MODULE_LABELS, PERMISSION_LEVELS, SENSITIVE_FLAGS, type PermissionMap, type SensitiveFlags } from "@/shared/rbac/levels";
 import { LEVEL_LABEL, LEVEL_TAG, type Notify, type RoleDto, type RoleMatrixDto } from "./types";
 import styles from "./users.module.css";
@@ -19,6 +21,11 @@ interface Draft {
 
 const draftOf = (r: RoleDto): Draft => ({ name: r.name, permissions: { ...r.permissions }, flags: { ...r.flags } });
 
+const ROLE_LABELS: Record<string, string> = { name: "Role name", copyFromRoleId: "Start with permissions of" };
+
+/** Same rule as the server's RoleNameSchema: 2–50 characters. */
+const roleNameProblem = (name: string) => rules.required(name, "a role name") ?? (name.trim().length < 2 ? "Use at least 2 characters." : rules.maxLength(name, 50));
+
 export function RolesTab({ roles, reloadRoles, notify }: { roles: RoleDto[]; reloadRoles: () => Promise<void>; notify: Notify }) {
   const [matrix, setMatrix] = useState<RoleMatrixDto | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -26,6 +33,8 @@ export function RolesTab({ roles, reloadRoles, notify }: { roles: RoleDto[]; rel
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [attempt, setAttempt] = useState(false);
+  const [serverNameError, setServerNameError] = useState<string | undefined>();
 
   const loadMatrix = useCallback(async () => {
     try {
@@ -43,6 +52,8 @@ export function RolesTab({ roles, reloadRoles, notify }: { roles: RoleDto[]; rel
 
   useEffect(() => {
     setDraft(selected ? draftOf(selected) : null);
+    setAttempt(false);
+    setServerNameError(undefined);
   }, [selected]);
 
   const refresh = async () => {
@@ -51,8 +62,15 @@ export function RolesTab({ roles, reloadRoles, notify }: { roles: RoleDto[]; rel
 
   const dirty = !!(selected && draft && JSON.stringify(draftOf(selected)) !== JSON.stringify(draft));
 
+  // Browser-side check of the role name; shown after the first save attempt and re-checked as you type.
+  const nameProblem = draft ? roleNameProblem(draft.name) : undefined;
+  const nameError = (attempt ? nameProblem : undefined) ?? serverNameError;
+
   async function save() {
     if (!selected || !draft) return;
+    setAttempt(true);
+    if (nameProblem) return;
+    setServerNameError(undefined);
     setSaving(true);
     try {
       const changedPermissions = Object.fromEntries(MODULE_KEYS.filter((m) => draft.permissions[m] !== selected.permissions[m]).map((m) => [m, draft.permissions[m]]));
@@ -68,7 +86,9 @@ export function RolesTab({ roles, reloadRoles, notify }: { roles: RoleDto[]; rel
       await refresh();
       notify({ kind: "success", title: "Role saved", message: `${draft.name.trim()} permissions apply to its users on their next action.` });
     } catch (err) {
-      notify({ kind: "error", title: "Could not save role", message: errorMessage(err) });
+      const fieldName = err instanceof ApiError ? err.fieldErrors().name : undefined;
+      if (fieldName) setServerNameError(fieldName);
+      else notify({ kind: "error", title: "Could not save role", message: errorMessage(err) });
     } finally {
       setSaving(false);
     }
@@ -174,12 +194,23 @@ export function RolesTab({ roles, reloadRoles, notify }: { roles: RoleDto[]; rel
 
         {selected && draft ? (
           <div className={styles.editor}>
+            {attempt && nameProblem ? <FormProblems problems={{ name: nameProblem }} labels={ROLE_LABELS} /> : null}
             {selected.isLocked ? (
               <Notification kind="info" title="The Admin role is locked">
                 Admin always has Full access to every module and can see cost, profit and margin. It cannot be edited or deleted.
               </Notification>
             ) : null}
-            <TextField label="Role name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} disabled={selected.isLocked} fieldClassName={styles.filterField} />
+            <TextField
+              label="Role name"
+              value={draft.name}
+              onChange={(e) => {
+                setDraft({ ...draft, name: e.target.value });
+                setServerNameError(undefined);
+              }}
+              error={nameError}
+              disabled={selected.isLocked}
+              fieldClassName={styles.filterField}
+            />
             <div className={styles.levelGrid}>
               {MODULE_KEYS.map((m) => (
                 <SelectField
@@ -220,7 +251,7 @@ export function RolesTab({ roles, reloadRoles, notify }: { roles: RoleDto[]; rel
                   <Button kind="secondary" onClick={() => setDraft(draftOf(selected))} disabled={!dirty || saving}>
                     Reset
                   </Button>
-                  <Button onClick={save} disabled={!dirty || saving || draft.name.trim().length < 2}>
+                  <Button onClick={save} disabled={!dirty || saving}>
                     {saving ? "Saving…" : "Save role"}
                   </Button>
                 </div>
@@ -263,21 +294,30 @@ export function RolesTab({ roles, reloadRoles, notify }: { roles: RoleDto[]; rel
 function NewRoleModal({ roles, onClose, onCreated }: { roles: RoleDto[]; onClose: () => void; onCreated: (r: RoleDto) => void }) {
   const [name, setName] = useState("");
   const [copyFrom, setCopyFrom] = useState("");
-  const [error, setError] = useState<string | undefined>();
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [attempt, setAttempt] = useState(false);
+
+  const problems = collect(["name", roleNameProblem(name)]);
+  const shownErrors = { ...errors, ...(attempt ? problems : {}) };
+
+  // A server error on a field disappears once the form is edited.
+  useEffect(() => setErrors({}), [name, copyFrom]);
 
   async function submit() {
-    if (name.trim().length < 2) return setError("Role name must be at least 2 characters.");
-    setError(undefined);
+    setAttempt(true);
     setFormError(null);
+    if (Object.keys(problems).length) return;
+    setErrors({});
     setSaving(true);
     try {
       const res = await api<{ data: RoleDto }>("/roles", { method: "POST", body: { name: name.trim(), ...(copyFrom ? { copyFromRoleId: copyFrom } : {}) } });
       onCreated(res.data);
     } catch (err) {
-      if (err instanceof ApiError && err.fieldErrors().name) setError(err.fieldErrors().name);
-      else setFormError(errorMessage(err));
+      const fields = err instanceof ApiError ? err.fieldErrors() : {};
+      setErrors(fields);
+      setFormError(Object.keys(fields).length ? "Some details need fixing. The fields are marked in red below." : errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -285,13 +325,14 @@ function NewRoleModal({ roles, onClose, onCreated }: { roles: RoleDto[]; onClose
 
   return (
     <Modal open size="sm" label="Roles" title="New role" primaryText="Create role" onClose={onClose} onSubmit={submit} submitting={saving}>
+      {attempt ? <FormProblems problems={problems} labels={ROLE_LABELS} /> : null}
       {formError ? (
-        <Notification kind="error" title="Could not create role">
+        <Notification kind="error" title="Could not create role" onClose={() => setFormError(null)}>
           {formError}
         </Notification>
       ) : null}
-      <TextField label="Role name" value={name} onChange={(e) => setName(e.target.value)} error={error} placeholder="e.g. Site Engineer" />
-      <SelectField label="Start with permissions of" value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)}>
+      <TextField label="Role name" value={name} onChange={(e) => setName(e.target.value)} error={shownErrors.name} placeholder="e.g. Site Engineer" helper="2–50 characters." />
+      <SelectField searchable label="Start with permissions of" value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)} error={shownErrors.copyFromRoleId}>
         <option value="">Blank (no access)</option>
         {roles.map((r) => (
           <option key={r.id} value={r.id}>

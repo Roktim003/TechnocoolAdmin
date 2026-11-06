@@ -14,7 +14,7 @@ import { processCatalogImportJob } from "@/modules/catalog/interface/import-jobs
 import { processDocumentJob } from "@/modules/inventory/interface/documents";
 import { processAlertJob } from "@/modules/inventory/interface/events";
 import { ensureDigestSchedule, processOpeningImportJob } from "@/modules/inventory/interface/jobs";
-import { processEmailJob } from "@/modules/notifications/interface/container";
+import { processEmailJob, processPushJob } from "@/modules/notifications/interface/container";
 import { wireModules } from "@/modules/bootstrap";
 import { PO_DOCUMENT_JOB, processPoDocumentJob } from "@/modules/purchasing/interface/documents";
 import { ensurePoDigestSchedule, processPurchasingJob } from "@/modules/purchasing/interface/events";
@@ -57,6 +57,12 @@ function start() {
       connection: bullConnection(),
       prefix: queuePrefix(),
       concurrency: 3,
+    }),
+    // Push notifications to the mobile app (FCM), one job per phone; temporary errors retry with backoff.
+    new Worker(QUEUES.push, (job) => processPushJob(job, log.child({ queue: QUEUES.push })), {
+      connection: bullConnection(),
+      prefix: queuePrefix(),
+      concurrency: 5,
     }),
     // Low-stock crossings after postings, and the daily digest (repeatable job).
     new Worker(QUEUES.alerts, (job) => processAlertJob(job, log.child({ queue: QUEUES.alerts })), {

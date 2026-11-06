@@ -199,6 +199,19 @@ export interface SerialRecord {
   reservedEntryId: string | null;
 }
 
+/** Where a serial came from: the receiving entry plus the shipment documents of an imported GRN. */
+export interface SerialArrival {
+  entry: { id: string; number: string | null; type: EntryType };
+  entryDate: string;
+  warehouseCode: string;
+  supplierName: string | null;
+  /** The GRN line's origin, else the Certificate of Origin. */
+  countryOfOrigin: string | null;
+  blNo: string | null;
+  boeNo: string | null;
+  boeDate: string | null;
+}
+
 export interface MovementInsert {
   entryId: string;
   lineId: string | null;
@@ -359,6 +372,8 @@ export interface InventoryStore {
   inTransitForProduct(productId: string, warehouseIds: string[]): Promise<{ entryId: string; number: string | null; fromCode: string; toCode: string; qty: string }[]>;
   listSerials(q: ListQuery<SerialFilters>): Promise<{ items: (SerialRecord & { productCode: string; productName: string; warehouseCode: string | null; projectCode: string | null; customerName: string | null })[]; total: number }>;
   serialHistory(id: string): Promise<{ id: string; at: Date; fromStatus: SerialStatus | null; toStatus: SerialStatus; entry: { id: string; number: string | null; type: EntryType }; fromWarehouse: string | null; toWarehouse: string | null }[]>;
+  /** The latest posted GRN / opening entry that brought this serial in, with its import documents. */
+  serialArrival(id: string): Promise<SerialArrival | null>;
 
   // attachments
   attachments(entityType: string, entityId: string): Promise<AttachmentRecord[]>;

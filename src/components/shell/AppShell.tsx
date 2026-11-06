@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { ConfirmHost } from "@/components/ui/ConfirmDialog";
 import { Icon } from "@/components/ui/Icon";
 import { HeaderActions, UserMenu } from "./HeaderActions";
+import { MobileNav } from "./MobileNav";
+import { TableLabels } from "./TableLabels";
 import { Crumbs, SideNav, type SideNavItem } from "./SideNav";
 import styles from "./AppShell.module.css";
 
@@ -18,7 +21,7 @@ export function AppShell({ user, nav, canSearchUsers, children }: AppShellProps)
       <a href="#main" className={styles.skip}>
         Skip to main content
       </a>
-      <aside className={styles.side} data-print="hide">
+      <aside id="app-sidebar" className={styles.side} data-print="hide">
         <div className={styles.sideTop}>
           <Link href="/dashboard" className={styles.brand}>
             <span className={styles.logo} aria-hidden="true">
@@ -34,6 +37,7 @@ export function AppShell({ user, nav, canSearchUsers, children }: AppShellProps)
       </aside>
       <div className={styles.main}>
         <header className={styles.topbar} data-print="hide">
+          <MobileNav />
           <Crumbs items={nav} />
           <span className={styles.spacer} />
           {canSearchUsers ? (
@@ -51,6 +55,9 @@ export function AppShell({ user, nav, canSearchUsers, children }: AppShellProps)
           {children}
         </main>
       </div>
+      <ConfirmHost />
+      <TableLabels />
+
     </div>
   );
 }

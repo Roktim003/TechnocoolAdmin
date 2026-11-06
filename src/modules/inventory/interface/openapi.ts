@@ -441,9 +441,25 @@ path("get", "/serials", "List serial numbers", `${VIEW} Search \`q\` by serial.`
   responses: { 200: json(listOf(SerialDto)), ...errors(400, 401, 403) },
 });
 
-path("get", "/serials/{id}", "A serial number and its history", VIEW, {
+const SerialArrivalDto = registry.register(
+  "SerialArrival",
+  z
+    .object({
+      entry: z.object({ id: z.string().uuid(), number: z.string().nullable(), type: z.string() }),
+      entryDate: z.string().openapi({ example: "2026-10-14" }),
+      warehouseCode: z.string(),
+      supplierName: z.string().nullable(),
+      countryOfOrigin: z.string().nullable().openapi({ description: "The GRN line's origin, else the Certificate of Origin" }),
+      blNo: z.string().nullable(),
+      boeNo: z.string().nullable(),
+      boeDate: z.string().nullable(),
+    })
+    .openapi({ description: "The latest posted GRN or opening-stock entry that brought the serial in (null if none)" }),
+);
+
+path("get", "/serials/{id}", "A serial number, where it came in and its history", VIEW, {
   request: { params: IdParams },
-  responses: { 200: json(dataOf(SerialDto.extend({ history: z.array(z.record(z.unknown())) }))), ...errors(401, 403, 404) },
+  responses: { 200: json(dataOf(SerialDto.extend({ cameIn: SerialArrivalDto.nullable(), history: z.array(z.record(z.unknown())) }))), ...errors(401, 403, 404) },
 });
 
 /* ── masters ── */

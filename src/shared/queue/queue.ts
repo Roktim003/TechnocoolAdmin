@@ -9,6 +9,8 @@ export const QUEUES = {
   openingImport: "opening-import",
   /** Outgoing email (retries with exponential backoff). */
   email: "email",
+  /** Push notifications to the mobile app (one job per phone, retried with backoff). */
+  push: "push",
   /** Low-stock checks after postings and the daily digest. */
   alerts: "alerts",
   /** Purchasing: the daily overdue-PO digest. */

@@ -1,0 +1,165 @@
+/* Read-only spreadsheet preview: Excel-like grid, sticky letters / row numbers / header row, sheet tabs. */
+.book {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--surface);
+}
+
+.scroller {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.grid td,
+.grid th {
+  height: 24px;
+  padding: 0 6px;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.grid td {
+  background: var(--surface);
+}
+
+.num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Column letters and row numbers, like Excel. */
+.colHead,
+.rowHead,
+.corner {
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.colHead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  text-align: center !important;
+  border-bottom-color: var(--border-strong) !important;
+}
+
+.rowHead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  border-right-color: var(--border-strong) !important;
+}
+
+.corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  border-right-color: var(--border-strong) !important;
+  border-bottom-color: var(--border-strong) !important;
+}
+
+/* The workbook's frozen header row stays under the column letters. */
+.frozen td,
+.frozen th {
+  position: sticky;
+  top: 25px;
+  z-index: 1;
+  border-bottom: 2px solid var(--border-strong);
+}
+
+.frozen th {
+  z-index: 2;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  flex: none;
+  min-height: 38px;
+  padding: 0 var(--s-3) 0 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.tabs {
+  display: flex;
+  align-self: stretch;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.tab {
+  flex: none;
+  padding: 0 var(--s-4);
+  border: none;
+  border-right: 1px solid var(--border);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: var(--surface-3);
+}
+
+.tabOn {
+  position: relative;
+  background: var(--surface);
+  color: var(--green);
+  font-weight: 600;
+}
+
+.tabOn::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--green);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.count {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.message {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: var(--s-6);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-align: center;
+}

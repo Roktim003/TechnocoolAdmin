@@ -17,6 +17,8 @@
 }
 
 .scroll {
+  /* Containing block for anything absolutely positioned inside, so it scrolls with the table. */
+  position: relative;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -94,4 +96,78 @@
 .table th:last-child,
 .table td:last-child {
   padding-right: 14px;
+}
+
+/* ── Phones: each row becomes a card of "label  value" lines (labels from <TableLabels />) ── */
+@media (max-width: 671px) {
+  .table,
+  .table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .table thead {
+    display: none;
+  }
+
+  .table tbody tr {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--divider);
+  }
+
+  .table tbody tr:first-child {
+    border-top: 0;
+  }
+
+  .table td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s-3);
+    height: auto;
+    min-height: 26px;
+    padding: 2px 0 !important;
+    border: 0 !important;
+    text-align: right;
+  }
+
+  .table td[data-label]::before {
+    content: attr(data-label);
+    flex: none;
+    max-width: 45%;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    text-align: left;
+  }
+
+  /* Cells without a column name (thumbnails, row actions) sit on the left. */
+  .table td:not([data-label]) {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .table td:empty {
+    display: none;
+  }
+
+  .table tbody tr:hover td {
+    background: none;
+  }
+
+  .table tbody tr:hover {
+    background: var(--surface-2);
+  }
+
+  .message {
+    justify-content: center !important;
+    text-align: center !important;
+  }
+
+  .toolbar > * {
+    flex: 1 1 100%;
+  }
 }

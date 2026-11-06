@@ -610,3 +610,38 @@ th[aria-sort] .sortIcon {
     page: landscape;
   }
 }
+
+/* Product filter: shared product dropdown + clear button. */
+.productFilter {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+.productFilter > button:first-child {
+  flex: 1;
+}
+
+.productClear {
+  flex: none;
+  width: var(--h-md);
+  height: var(--h-md);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.productClear:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.productClear:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}

@@ -65,8 +65,8 @@
   height: 22px;
   flex: none;
   border-radius: 6px;
-  background: #000;
-  color: #fff;
+  background: var(--text);
+  color: var(--bg);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -365,7 +365,45 @@
   color: var(--text-3);
 }
 
-/* ── Tablet / phone: sidebar becomes a horizontal strip above the content ── */
+/* ── Menu button + drawer backdrop (only used below 900px) ── */
+.menuButton {
+  display: none;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin-left: -8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.menuButton:hover {
+  background: var(--surface-2);
+}
+
+.menuButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.navBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 190;
+  background: var(--overlay);
+  animation: backdropIn 180ms var(--ease);
+}
+
+@keyframes backdropIn {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ── Tablet / phone: the sidebar is a drawer that slides in from the left ── */
 @media (max-width: 899px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
@@ -373,53 +411,38 @@
   }
 
   .side {
-    position: static;
-    height: auto;
-    flex-direction: row;
-    align-items: center;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 200;
+    width: min(288px, 86vw);
+    height: 100dvh;
+    border-right: 1px solid var(--border);
+    box-shadow: var(--shadow-pop);
+    transform: translateX(-102%);
+    visibility: hidden;
+    transition:
+      transform 240ms var(--ease),
+      visibility 0s linear 240ms;
   }
 
-  .sideTop {
-    padding: 6px 4px 6px 8px;
+  :global(html[data-nav="open"]) .side {
+    transform: none;
+    visibility: visible;
+    transition: transform 240ms var(--ease);
   }
 
-  .brandName,
-  .groupHead,
-  .userText,
-  .avatar {
-    display: none;
-  }
-
-  .navScroll {
-    display: flex;
-    gap: 2px;
-    overflow-x: auto;
-    padding: 6px 4px;
-  }
-
-  .group {
-    margin-top: 0;
-  }
-
-  .navList {
-    flex-direction: row;
-    gap: 2px;
-  }
-
+  /* Bigger touch targets in the drawer. */
   .navItem {
-    height: 34px;
+    height: 40px;
+    font-size: var(--fs-md);
   }
 
-  .sideBottom {
-    border-top: none;
-    border-left: 1px solid var(--border);
-    padding: 6px;
+  .menuButton {
+    display: grid;
   }
 
-  .user {
-    padding: 0;
+  .topbar {
+    padding: 0 8px 0 16px;
   }
 
   .search {
@@ -434,6 +457,28 @@
 @media (max-width: 559px) {
   .search {
     display: none;
+  }
+
+  .topbar {
+    padding-left: 12px;
+  }
+
+  .content {
+    padding: 16px 12px 40px;
+  }
+
+  /* Phones: only the current section in the breadcrumb. */
+  .crumbs > a:first-child,
+  .crumbs > a:first-child + .crumbSep {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .side,
+  .navBackdrop {
+    transition: none !important;
+    animation: none !important;
   }
 }
 
@@ -450,4 +495,94 @@
     max-width: none;
     padding: 0;
   }
+}
+
+/* ── Theme menu (top bar) ── */
+.themeWrap {
+  position: relative;
+  display: flex;
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  width: var(--h-md);
+  height: var(--h-md);
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
+}
+
+.iconButton:hover,
+.iconButton[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.iconButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.themeMenu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 168px;
+  padding: 4px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  transform-origin: top right;
+  animation: themeIn 140ms var(--ease);
+}
+
+@keyframes themeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-2px);
+  }
+}
+
+.themeItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: var(--h-md);
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.themeItem:hover,
+.themeItem:focus-visible {
+  outline: none;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.themeItemOn {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.themeItem span {
+  flex: 1;
+}
+
+.themeCheck {
+  color: var(--accent);
 }

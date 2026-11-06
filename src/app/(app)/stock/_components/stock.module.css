@@ -361,41 +361,6 @@ a.mono:hover {
   min-width: 240px;
 }
 
-.pickerList {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  max-height: 280px;
-  margin: 0;
-  padding: var(--s-1);
-  overflow-y: auto;
-  list-style: none;
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-pop);
-}
-
-.pickerItem {
-  display: block;
-  width: 100%;
-  padding: var(--s-2) var(--s-2);
-  border: none;
-  border-radius: var(--r-sm);
-  background: none;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--fs);
-  text-align: left;
-  cursor: pointer;
-}
-
-.pickerItem:hover,
-.pickerActive {
-  background: var(--surface-2);
-}
-
 .pickerChosen {
   display: flex;
   align-items: flex-start;
@@ -648,9 +613,153 @@ a.mono:hover {
   }
 }
 
+/* ── Phones ──
+ * Line tables become a stack of cards: one card per line, each cell labelled from its column
+ * header (data-label, filled in by <TableLabels /> in the shell). The product cell spans the
+ * card; the remove button sits at the bottom right.
+ */
+@media (max-width: 671px) {
+  .linesWrap {
+    overflow: visible;
+  }
+
+  .lines,
+  .lines tbody,
+  .lines tfoot {
+    display: block;
+    width: 100%;
+  }
+
+  .lines thead {
+    display: none;
+  }
+
+  .lines tbody tr,
+  .lines tfoot tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    background: var(--surface);
+  }
+
+  .lines tbody tr + tr,
+  .lines tfoot tr {
+    margin-top: 8px;
+  }
+
+  .lines tfoot tr {
+    background: var(--sunken);
+  }
+
+  .lines td {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    width: auto !important;
+    padding: 0 !important;
+    border: 0 !important;
+    text-align: left !important;
+  }
+
+  .lines td[data-label]::before {
+    content: attr(data-label);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+  }
+
+  /* First cell (product / description) and wide cells take the full card width. */
+  .lines td:first-child,
+  .lines td[colspan] {
+    grid-column: 1 / -1;
+  }
+
+  /* Unlabelled last cell (row actions, e.g. Remove): full width, aligned right. */
+  .lines td:last-child:not([data-label]) {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: flex-end;
+  }
+
+  .lines td:empty {
+    display: none;
+  }
+
+  .cellInput {
+    min-width: 0;
+    height: var(--h-lg);
+    font-size: 16px; /* no zoom-on-focus on iPhone */
+  }
+
+  /* Sticky action bar: buttons share the width; the label above them is dropped. */
+  .footer {
+    padding: var(--s-2);
+    border-radius: var(--r);
+  }
+
+  .footer > :not(.footerActions) {
+    display: none;
+  }
+
+  /* Two per row; an odd last button (usually the main action) takes the full row. */
+  .footerActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .footerActions > * {
+    width: 100%;
+    min-width: 0;
+    height: var(--h-lg);
+    justify-content: center;
+  }
+
+  .footerActions > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
+  /* Filters and form grids: one column. */
+  .toolbar > *,
+  .filter {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: none;
+  }
+
+  .detailHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .detailTitle {
+    font-size: var(--fs-xl);
+  }
+
+  .detailActions > * {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
 @media print {
   .footer,
   .detailActions {
     display: none;
   }
+}
+
+/* Missing / invalid fields listed above the entry form. */
+.problemList {
+  margin: var(--s-1) 0 0;
+  padding-left: 1.1em;
+}
+
+.problemList li + li {
+  margin-top: 2px;
 }

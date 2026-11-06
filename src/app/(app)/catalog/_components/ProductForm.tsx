@@ -5,15 +5,43 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { SelectField, TextAreaField, TextField, Toggle } from "@/components/ui/Field";
+import { FormProblems } from "@/components/ui/FormProblems";
 import { Notification } from "@/components/ui/Notification";
 import { api, ApiError, errorMessage, upload } from "@/lib/api-client";
+import { collect, revealProblems, rules } from "@/lib/validation";
 import { PhotoManager } from "./PhotoManager";
 import type { CatalogCaps, CatalogDto, CategoryDto, PhotoDto, ProductDto, UnitDto } from "./types";
 import styles from "./catalog.module.css";
 
+// Same as the server's PRODUCT_CODE_PATTERN (catalog/domain/rules.ts).
 const CODE_PATTERN = /^[A-Z0-9][A-Z0-9-]{1,30}$/;
-const MONEY = /^\d{1,12}(\.\d{1,2})?$/;
-const QTY = /^\d{1,11}(\.\d{1,3})?$/;
+const CODE_MESSAGE = "Use 2–31 characters: A–Z, 0–9 and '-', starting with a letter or digit.";
+// Barcode: printable characters, no spaces (CreateProductSchema.barcode).
+const BARCODE = /^[\x21-\x7E]+$/;
+
+const LABELS: Record<string, string> = {
+  name: "Item name",
+  code: "Code / SKU",
+  catalogId: "Brand",
+  model: "Model number",
+  categoryId: "Category",
+  unitId: "Unit of measure",
+  purchaseCost: "Purchase cost",
+  sellingPrice: "Selling price",
+  minStockLevel: "Min stock level",
+  barcode: "Barcode",
+  warrantyMonths: "Warranty",
+  defaultSupplierName: "Default supplier",
+  countryOfOrigin: "Country of origin",
+  hsCode: "HS code",
+  capacity: "Capacity",
+  refrigerant: "Refrigerant",
+  powerSupply: "Power supply",
+  dimensionsWeight: "Dimensions / weight",
+  purchaseUnitId: "Purchase unit",
+  purchaseUnitFactor: "Conversion factor",
+  specifications: "Specifications / notes",
+};
 
 type Values = Record<
   | "name" | "code" | "catalogId" | "model" | "categoryId" | "unitId" | "purchaseCost" | "sellingPrice"
@@ -78,6 +106,7 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [attempt, setAttempt] = useState(false);
   const [catalogs, setCatalogs] = useState<CatalogDto[]>([]);
   const [categories, setCategories] = useState<CategoryDto[]>([]);
   const [units, setUnits] = useState<UnitDto[]>([]);
@@ -86,6 +115,7 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
   const [code, setCode] = useState<CodeState>({ state: "idle" });
   const [newCategory, setNewCategory] = useState<string | null>(null);
   const [newCategoryError, setNewCategoryError] = useState<string>();
+  const [newCategoryAttempt, setNewCategoryAttempt] = useState(false);
   // One key per form session: a double-submit or retry can't create two products.
   const idempotencyKey = useMemo(() => `product-${crypto.randomUUID()}`, []);
 
@@ -131,50 +161,76 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
   // Inactive options stay selectable only if the product already uses them.
   const usable = <T extends { id: string; isActive: boolean }>(list: T[], current: string | undefined) => list.filter((x) => x.isActive || x.id === current);
 
-  function validate(): Record<string, string> {
-    const e: Record<string, string> = {};
-    const strip = (s: string) => s.trim().replace(/,/g, "");
-    if (!v.name.trim()) e.name = "Item name is required.";
-    if (!editing) {
-      if (!v.code.trim()) e.code = "Code is required.";
-      else if (!CODE_PATTERN.test(v.code.trim())) e.code = "2–31 characters: A–Z, 0–9 and '-', starting with a letter or digit.";
-      else if (code.state === "taken") e.code = "This code is already in use.";
-    }
-    if (!v.catalogId) e.catalogId = "Choose a brand.";
-    if (!v.categoryId) e.categoryId = "Choose a category.";
-    if (!v.unitId) e.unitId = "Choose a unit.";
-    if (!MONEY.test(strip(v.sellingPrice))) e.sellingPrice = v.sellingPrice ? "Enter an amount ≥ 0 with at most 2 decimals." : "Selling price is required.";
-    if (caps.seeCost && !MONEY.test(strip(v.purchaseCost))) e.purchaseCost = v.purchaseCost ? "Enter an amount ≥ 0 with at most 2 decimals." : "Purchase cost is required.";
-    if (v.minStockLevel && !QTY.test(strip(v.minStockLevel))) e.minStockLevel = "Enter a number ≥ 0 (up to 3 decimals).";
-    if (v.warrantyMonths && !/^\d{1,3}$/.test(v.warrantyMonths.trim())) e.warrantyMonths = "Whole months, 0–600.";
-    if (v.purchaseUnitId && !v.purchaseUnitFactor) e.purchaseUnitFactor = "Enter how many base units are in one purchase unit.";
-    if (!v.purchaseUnitId && v.purchaseUnitFactor) e.purchaseUnitId = "Choose the purchase unit.";
-    if (v.purchaseUnitFactor && (!QTY.test(strip(v.purchaseUnitFactor)) || !/[1-9]/.test(v.purchaseUnitFactor))) e.purchaseUnitFactor = "Enter a number greater than 0.";
-    return e;
-  }
+  // Browser-side checks (same rules as CreateProductSchema / UpdateProductSchema); every problem is shown at once.
+  const codeValue = v.code.trim();
+  const factorBlank = !v.purchaseUnitFactor.trim();
+  const problems = collect(
+    ["name", rules.required(v.name, "the item name") ?? rules.maxLength(v.name, 200)],
+    [
+      "code",
+      editing
+        ? undefined
+        : (rules.required(codeValue, "a code") ?? (!CODE_PATTERN.test(codeValue) ? CODE_MESSAGE : code.state === "taken" ? "This code is already used by another product. Enter a different one." : undefined)),
+    ],
+    ["catalogId", rules.chosen(v.catalogId, "a brand")],
+    ["model", rules.maxLength(v.model, 100)],
+    ["categoryId", rules.chosen(v.categoryId, "a category")],
+    ["unitId", rules.chosen(v.unitId, "a unit")],
+    ["purchaseCost", caps.seeCost ? (rules.required(v.purchaseCost, "the purchase cost") ?? rules.money(v.purchaseCost)) : undefined],
+    ["sellingPrice", rules.required(v.sellingPrice, "the selling price") ?? rules.money(v.sellingPrice)],
+    ["minStockLevel", rules.qty(v.minStockLevel)],
+    ["barcode", rules.maxLength(v.barcode, 64) ?? (v.barcode.trim() && !BARCODE.test(v.barcode.trim()) ? "Use letters, digits and symbols only, without spaces." : undefined)],
+    ["warrantyMonths", rules.integer(v.warrantyMonths, { min: 0, max: 600 })],
+    ["defaultSupplierName", suppliers ? undefined : rules.maxLength(v.defaultSupplierName, 200)],
+    ["countryOfOrigin", rules.maxLength(v.countryOfOrigin, 100)],
+    ["hsCode", rules.maxLength(v.hsCode, 20)],
+    ["capacity", rules.maxLength(v.capacity, 100)],
+    ["refrigerant", rules.maxLength(v.refrigerant, 50)],
+    ["powerSupply", rules.maxLength(v.powerSupply, 100)],
+    ["dimensionsWeight", rules.maxLength(v.dimensionsWeight, 200)],
+    // Purchase unit and factor come as a pair; the factor must be > 0 (assertPurchaseUnit).
+    ["purchaseUnitId", !v.purchaseUnitId && !factorBlank ? "Choose the purchase unit, or clear the conversion factor." : undefined],
+    [
+      "purchaseUnitFactor",
+      v.purchaseUnitId && factorBlank ? "Enter how many base units are in one purchase unit." : (rules.qty(v.purchaseUnitFactor, { positive: true })),
+    ],
+    ["specifications", rules.maxLength(v.specifications, 5000)],
+  );
+  const shownErrors: Record<string, string | undefined> = { ...errors, ...(attempt ? problems : {}) };
+
+  // Inline "+ New category": name required, at most 60 characters (CreateCategorySchema).
+  const newCategoryProblem = newCategory === null ? undefined : (rules.required(newCategory, "a name") ?? rules.maxLength(newCategory, 60));
+  const shownNewCategoryError = newCategoryError ?? (newCategoryAttempt ? newCategoryProblem : undefined);
 
   async function addCategory() {
-    if (!newCategory?.trim()) return setNewCategoryError("Enter a name.");
+    setNewCategoryAttempt(true);
+    setNewCategoryError(undefined);
+    if (newCategory === null || newCategoryProblem) return;
     try {
       const c = (await api<{ data: CategoryDto }>("/categories", { method: "POST", body: { name: newCategory.trim() } })).data;
       setCategories((list) => [...list, c].sort((a, b) => a.name.localeCompare(b.name)));
       setV((prev) => ({ ...prev, categoryId: c.id }));
-      setNewCategory(null);
-      setNewCategoryError(undefined);
+      closeNewCategory();
     } catch (err) {
       setNewCategoryError(err instanceof ApiError ? (err.fieldErrors().name ?? err.message) : errorMessage(err));
     }
   }
 
+  function closeNewCategory() {
+    setNewCategory(null);
+    setNewCategoryError(undefined);
+    setNewCategoryAttempt(false);
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
-    const found = validate();
-    setErrors(found);
+    setAttempt(true);
     setFormError(null);
-    if (Object.values(found).some(Boolean)) {
-      setFormError("Fix the highlighted fields and try again.");
+    if (Object.keys(problems).length) {
+      revealProblems();
       return;
     }
+    setErrors({});
 
     const { code: _code, purchaseCost, status, ...fields } = v;
     // Status changes go through Discontinue / Reactivate once the product exists.
@@ -200,10 +256,11 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
       }
       router.push(`/catalog/${created.id}?saved=1`);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setErrors(err.fieldErrors());
-        setFormError(err.message);
-      } else setFormError(errorMessage(err));
+      const fields = err instanceof ApiError ? err.fieldErrors() : {};
+      setErrors(fields);
+      // Field problems are marked on the fields; only say something general when there are none.
+      setFormError(Object.keys(fields).length ? "Some details need fixing. The fields are marked in red below." : errorMessage(err));
+      revealProblems();
       setSaving(false);
     }
   }
@@ -226,6 +283,7 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
           {formError}
         </Notification>
       ) : null}
+      {attempt ? <FormProblems problems={problems} labels={LABELS} /> : null}
 
       <section className={styles.section} aria-labelledby="sec-basic">
         <h2 id="sec-basic" className={styles.sectionTitle}>
@@ -233,12 +291,12 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
         </h2>
         <p className={styles.sectionHelp}>Fields marked * are required.</p>
         <div className={styles.grid}>
-          <TextField label={num(1, "Item name *")} value={v.name} onChange={set("name")} error={errors.name} fieldClassName={styles.full} placeholder="e.g. LG Dual Inverter Split AC 1.5 Ton" />
+          <TextField label={num(1, "Item name *")} value={v.name} onChange={set("name")} error={shownErrors.name} fieldClassName={styles.full} placeholder="e.g. LG Dual Inverter Split AC 1.5 Ton" />
           <TextField
             label={num(2, "Code / SKU *")}
             value={v.code}
             onChange={set("code")}
-            error={errors.code || (code.state === "invalid" && v.code ? "2–31 characters: A–Z, 0–9 and '-', starting with a letter or digit." : undefined)}
+            error={shownErrors.code || (!editing && code.state === "invalid" && v.code ? CODE_MESSAGE : undefined)}
             helper={editing ? "Codes can’t be changed after saving." : codeHint}
             readOnly={editing}
             disabled={editing}
@@ -248,7 +306,7 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
             placeholder="LG-S18ET"
           />
           <div />
-          <SelectField label={num("3a", "Brand (catalog) *")} value={v.catalogId} onChange={set("catalogId")} error={errors.catalogId}>
+          <SelectField searchable label={num("3a", "Brand (catalog) *")} value={v.catalogId} onChange={set("catalogId")} error={shownErrors.catalogId}>
             <option value="">Choose a brand</option>
             {usable(catalogs, product?.catalog.id).map((c) => (
               <option key={c.id} value={c.id}>
@@ -257,9 +315,9 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
               </option>
             ))}
           </SelectField>
-          <TextField label={num("3b", "Model number")} value={v.model} onChange={set("model")} error={errors.model} mono placeholder="S4-Q18KL3AA" />
+          <TextField label={num("3b", "Model number")} value={v.model} onChange={set("model")} error={shownErrors.model} mono placeholder="S4-Q18KL3AA" />
           <div>
-            <SelectField label={num(4, "Category *")} value={v.categoryId} onChange={set("categoryId")} error={errors.categoryId}>
+            <SelectField searchable label={num(4, "Category *")} value={v.categoryId} onChange={set("categoryId")} error={shownErrors.categoryId}>
               <option value="">Choose a category</option>
               {usable(categories, product?.category.id).map((c) => (
                 <option key={c.id} value={c.id}>
@@ -275,18 +333,34 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
                 </button>
               ) : (
                 <div className={styles.inlineAdd}>
-                  <TextField label="New category name" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} error={newCategoryError} autoFocus />
+                  <TextField
+                    label="New category name"
+                    value={newCategory}
+                    onChange={(e) => {
+                      setNewCategory(e.target.value);
+                      setNewCategoryError(undefined);
+                    }}
+                    onKeyDown={(e) => {
+                      // Enter adds the category instead of submitting the whole product form.
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void addCategory();
+                      }
+                    }}
+                    error={shownNewCategoryError}
+                    autoFocus
+                  />
                   <Button size="sm" onClick={addCategory}>
                     Add
                   </Button>
-                  <Button kind="ghost" size="sm" onClick={() => setNewCategory(null)}>
+                  <Button kind="ghost" size="sm" onClick={closeNewCategory}>
                     Cancel
                   </Button>
                 </div>
               )
             ) : null}
           </div>
-          <SelectField label={num(5, "Unit of measure *")} value={v.unitId} onChange={set("unitId")} error={errors.unitId} helper="Stock is always counted in this unit.">
+          <SelectField searchable label={num(5, "Unit of measure *")} value={v.unitId} onChange={set("unitId")} error={shownErrors.unitId} helper="Stock is always counted in this unit.">
             <option value="">Choose a unit</option>
             {units
               .filter((u) => u.isActive || u.id === product?.unit.id)
@@ -320,9 +394,9 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
         <p className={styles.sectionHelp}>Amounts in BDT.</p>
         <div className={styles.grid}>
           {caps.seeCost ? (
-            <TextField label="Purchase cost (BDT) *" inputMode="decimal" value={v.purchaseCost} onChange={set("purchaseCost")} error={errors.purchaseCost} placeholder="0.00" />
+            <TextField label="Purchase cost (BDT) *" kind="money" value={v.purchaseCost} onChange={set("purchaseCost")} error={shownErrors.purchaseCost} placeholder="0.00" />
           ) : null}
-          <TextField label="Selling price (BDT) *" inputMode="decimal" value={v.sellingPrice} onChange={set("sellingPrice")} error={errors.sellingPrice} placeholder="0.00" />
+          <TextField label="Selling price (BDT) *" kind="money" value={v.sellingPrice} onChange={set("sellingPrice")} error={shownErrors.sellingPrice} placeholder="0.00" />
         </div>
         <p className={styles.note}>Cost can later update automatically from purchases (average cost).</p>
       </section>
@@ -333,15 +407,15 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
         </h2>
         <p className={styles.sectionHelp}>Fill in what you know; everything here can be added later.</p>
         <div className={styles.grid3}>
-          <TextField label="Min stock level" inputMode="decimal" value={v.minStockLevel} onChange={set("minStockLevel")} error={errors.minStockLevel} helper="For low-stock alerts." />
-          <TextField label="Barcode" value={v.barcode} onChange={set("barcode")} error={errors.barcode} mono />
-          <TextField label="Warranty (months)" inputMode="numeric" value={v.warrantyMonths} onChange={set("warrantyMonths")} error={errors.warrantyMonths} />
+          <TextField label="Min stock level" kind="qty" value={v.minStockLevel} onChange={set("minStockLevel")} error={shownErrors.minStockLevel} helper="For low-stock alerts." />
+          <TextField label="Barcode" value={v.barcode} onChange={set("barcode")} error={shownErrors.barcode} mono spellCheck={false} />
+          <TextField label="Warranty (months)" kind="integer" value={v.warrantyMonths} onChange={set("warrantyMonths")} error={shownErrors.warrantyMonths} helper="0 to 600." />
           {suppliers ? (
-            <SelectField
+            <SelectField searchable
               label="Default supplier"
               value={v.defaultSupplierId}
               onChange={set("defaultSupplierId")}
-              error={errors.defaultSupplierId}
+              error={shownErrors.defaultSupplierId}
               helper={!v.defaultSupplierId && v.defaultSupplierName ? `Unlinked: “${v.defaultSupplierName}”. Pick the supplier record.` : "Low stock → Create PO uses it."}
             >
               <option value="">None</option>
@@ -354,24 +428,24 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
                 ))}
             </SelectField>
           ) : (
-            <TextField label="Default supplier" value={v.defaultSupplierName} onChange={set("defaultSupplierName")} error={errors.defaultSupplierName} />
+            <TextField label="Default supplier" value={v.defaultSupplierName} onChange={set("defaultSupplierName")} error={shownErrors.defaultSupplierName} />
           )}
-          <SelectField label="Source" value={v.source} onChange={set("source")}>
+          <SelectField label="Source" value={v.source} onChange={set("source")} error={shownErrors.source}>
             <option value="">Not set</option>
             <option value="IMPORTED">Imported</option>
             <option value="LOCAL">Local</option>
           </SelectField>
-          <TextField label="Country of origin" value={v.countryOfOrigin} onChange={set("countryOfOrigin")} error={errors.countryOfOrigin} />
-          <TextField label="HS code" value={v.hsCode} onChange={set("hsCode")} error={errors.hsCode} mono />
-          <TextField label="Capacity" value={v.capacity} onChange={set("capacity")} error={errors.capacity} placeholder="1.5 Ton / 18,000 BTU" />
-          <TextField label="Refrigerant" value={v.refrigerant} onChange={set("refrigerant")} error={errors.refrigerant} placeholder="R32" />
-          <TextField label="Power supply" value={v.powerSupply} onChange={set("powerSupply")} error={errors.powerSupply} placeholder="220-240V / 1Ph / 50Hz" />
-          <TextField label="Dimensions / weight" value={v.dimensionsWeight} onChange={set("dimensionsWeight")} error={errors.dimensionsWeight} />
+          <TextField label="Country of origin" value={v.countryOfOrigin} onChange={set("countryOfOrigin")} error={shownErrors.countryOfOrigin} />
+          <TextField label="HS code" value={v.hsCode} onChange={set("hsCode")} error={shownErrors.hsCode} mono />
+          <TextField label="Capacity" value={v.capacity} onChange={set("capacity")} error={shownErrors.capacity} placeholder="1.5 Ton / 18,000 BTU" />
+          <TextField label="Refrigerant" value={v.refrigerant} onChange={set("refrigerant")} error={shownErrors.refrigerant} placeholder="R32" />
+          <TextField label="Power supply" value={v.powerSupply} onChange={set("powerSupply")} error={shownErrors.powerSupply} placeholder="220-240V / 1Ph / 50Hz" />
+          <TextField label="Dimensions / weight" value={v.dimensionsWeight} onChange={set("dimensionsWeight")} error={shownErrors.dimensionsWeight} />
           <SelectField label="Status" value={v.status} onChange={set("status")} disabled={editing} helper={editing ? "Use Discontinue / Reactivate on the product page." : undefined}>
             <option value="ACTIVE">Active</option>
             <option value="DISCONTINUED">Discontinued</option>
           </SelectField>
-          <SelectField label="Purchase unit" value={v.purchaseUnitId} onChange={set("purchaseUnitId")} error={errors.purchaseUnitId} helper="If bought in a different unit, e.g. roll.">
+          <SelectField searchable label="Purchase unit" value={v.purchaseUnitId} onChange={set("purchaseUnitId")} error={shownErrors.purchaseUnitId} helper="If bought in a different unit, e.g. roll.">
             <option value="">Same as base unit</option>
             {units
               .filter((u) => u.isActive || u.id === product?.purchaseUnit?.id)
@@ -383,10 +457,10 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
           </SelectField>
           <TextField
             label="Conversion factor"
-            inputMode="decimal"
+            kind="qty"
             value={v.purchaseUnitFactor}
             onChange={set("purchaseUnitFactor")}
-            error={errors.purchaseUnitFactor}
+            error={shownErrors.purchaseUnitFactor}
             helper={
               v.purchaseUnitId && v.unitId
                 ? `1 ${units.find((u) => u.id === v.purchaseUnitId)?.code ?? ""} = ${v.purchaseUnitFactor || "?"} ${units.find((u) => u.id === v.unitId)?.code ?? ""}`
@@ -401,7 +475,7 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
               description="Turn on for items with a serial number on each unit (e.g. outdoor / indoor units). Stock in and out will then ask for the serial number of every piece."
             />
           </div>
-          <TextAreaField label="Specifications / notes" value={v.specifications} onChange={set("specifications")} error={errors.specifications} fieldClassName={styles.full} rows={5} />
+          <TextAreaField label="Specifications / notes" value={v.specifications} onChange={set("specifications")} error={shownErrors.specifications} fieldClassName={styles.full} rows={5} />
         </div>
       </section>
 

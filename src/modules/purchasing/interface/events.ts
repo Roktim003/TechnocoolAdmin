@@ -69,7 +69,7 @@ export const purchasingNotifier: PurchasingNotifier = {
       select: { id: true, email: true, role: { select: { permissions: { where: { module: "purchasing" }, select: { level: true } } } }, warehouses: { select: { warehouseId: true } } },
     });
     const prefs = await prisma.notificationPreference.findMany({ where: { type: "PO_OVERDUE_DIGEST", userId: { in: users.map((u) => u.id) } }, select: { userId: true, email: true } });
-    const off = new Set(prefs.filter((p) => !p.email).map((p) => p.userId));
+    const off = new Set(prefs.filter((p) => p.email === false).map((p) => p.userId));
     const date = new Intl.DateTimeFormat("en-GB", { timeZone: APP_TIMEZONE, day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${today}T06:00:00Z`));
     const service = notifications().service;
     let emailed = 0;

@@ -3,7 +3,7 @@ import * as dashRoute from "@/app/api/v1/dashboard/route";
 import { call } from "../helpers/http";
 import { resetDatabase } from "../helpers/db";
 import { adminToken } from "../helpers/fixtures";
-import { createEntry, grn, post, prisma, product, project, userToken, wh } from "../helpers/inventory";
+import { createEntry, grn, post, prisma, product, project, reject, userToken, wh } from "../helpers/inventory";
 import { customUser } from "../helpers/purchasing";
 
 let token: string;
@@ -83,6 +83,28 @@ describe("widgets per role", () => {
       expect(w.chart?.valueType ?? "number", w.id).not.toBe("money");
     }
     expect(JSON.stringify(d)).not.toMatch(/7000|8000|1000\.00/);
+  });
+
+  it("Store Manager: own drafts and rejected entries as tiles; approvers don't get them", async () => {
+    const sm = tokens["Store Manager"]!;
+    const before = await dashboard(sm);
+    expect(widget(before, "my-drafts")).toMatchObject({ kind: "kpi", value: 0, link: "/stock?tab=entries&status=DRAFT&mine=1" });
+    expect(widget(before, "my-rejected")).toMatchObject({ kind: "kpi", value: 0, tone: "default" });
+    // Right after the low-stock tile.
+    expect(ids(before).slice(ids(before).indexOf("low-stock") + 1, ids(before).indexOf("low-stock") + 3)).toEqual(["my-drafts", "my-rejected"]);
+
+    const body = { type: "DAMAGE_WRITE_OFF", warehouseId: A, reason: "Dented", lines: [{ productId, qty: 1 }] };
+    await createEntry(sm, { ...body, action: "draft" });
+    const sent = (await createEntry(sm, { ...body, action: "submit" })).body.data;
+    await reject(sent.id, token, "Wrong product");
+    const after = await dashboard(sm);
+    expect(widget(after, "my-drafts").value).toBe(1);
+    expect(widget(after, "my-rejected")).toMatchObject({ value: 1, tone: "danger" });
+    // Another Store Manager's tiles are their own.
+    const other = await dashboard((await userToken(token, "Store Manager")).token);
+    expect(widget(other, "my-drafts").value).toBe(0);
+    expect(widget(other, "my-rejected").value).toBe(0);
+    for (const t of [token, tokens.Manager!, tokens.Accounts!]) expect(ids(await dashboard(t))).not.toContain("my-drafts");
   });
 
   it("users without dashboard access get 403", async () => {

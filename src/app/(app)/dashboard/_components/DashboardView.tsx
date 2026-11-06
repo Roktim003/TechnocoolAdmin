@@ -19,6 +19,9 @@ const KPI_ICONS: Record<string, IconName> = {
   "overdue-pos": "clock",
   "running-projects": "kanban",
   transfers: "truck",
+  // Creators who can't verify (Store Manager).
+  "my-drafts": "fileText",
+  "my-rejected": "x",
   // Overhead access only (overheads ≥ VIEW + seeCost).
   overheadsThisMonth: "archive",
   overheadsNotCharged: "clipboard",

@@ -1,0 +1,319 @@
+/* Gr8r Studio date picker: input-styled trigger + calendar popover (same look as the Select menu). */
+.wrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+/* The real <input type="date|month">: keeps value / name / onChange, hidden from view and tab order. */
+.native {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: var(--h-md);
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--border-strong) 60%, var(--text-3));
+}
+
+.trigger:focus-visible,
+.open,
+.open:hover:not(:disabled) {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.trigger:disabled {
+  background: var(--surface-2);
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.trigger[aria-invalid="true"] {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px var(--red-soft);
+}
+
+.value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.placeholder {
+  color: var(--text-3);
+}
+
+.icon {
+  flex: none;
+  color: var(--text-3);
+}
+
+.open .icon {
+  color: var(--accent);
+}
+
+/* ── Popover (portalled to <body>, page coordinates) ── */
+.pop {
+  position: absolute;
+  z-index: 300;
+  padding: 10px;
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  font-family: var(--font-sans);
+  font-size: var(--fs);
+  color: var(--text);
+  animation: dateIn 140ms var(--ease);
+}
+
+@keyframes dateIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.nav {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--dur);
+}
+
+.nav:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.nav:disabled {
+  color: var(--text-4);
+  cursor: default;
+}
+
+.title,
+.titleStatic {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs);
+  font-weight: 600;
+}
+
+.title {
+  cursor: pointer;
+}
+
+.title:hover {
+  background: var(--surface-2);
+}
+
+.titleChevron {
+  color: var(--text-3);
+}
+
+.nav:focus-visible,
+.title:focus-visible,
+.link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 2px;
+}
+
+.week span {
+  display: grid;
+  place-items: center;
+  height: 26px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+
+.days,
+.months {
+  display: grid;
+  gap: 2px;
+  outline: none;
+}
+
+.days {
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.months {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.day,
+.month {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--dur);
+}
+
+.day {
+  height: 34px;
+  font-size: var(--fs-sm);
+}
+
+.month {
+  height: 44px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.day:hover,
+.month:hover {
+  background: var(--surface-2);
+}
+
+.outside {
+  color: var(--text-4);
+}
+
+/* Today: accent text with a small dot under the number. */
+.today {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.today::after {
+  content: "";
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.selected,
+.selected:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+/* Keyboard position (only while the grid has keyboard focus). */
+.days:focus-visible .cursor,
+.months:focus-visible .cursor {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.days:focus-visible .selected.cursor,
+.months:focus-visible .selected.cursor {
+  box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 4px var(--surface);
+}
+
+.off,
+.off:hover {
+  background: none;
+  color: var(--text-4);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.off.today::after {
+  display: none;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--divider);
+}
+
+.link {
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.link:hover {
+  background: var(--accent-soft);
+}
+
+@media (max-width: 671px) {
+  .day {
+    height: 38px;
+  }
+}

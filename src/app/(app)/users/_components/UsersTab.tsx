@@ -191,7 +191,7 @@ export function UsersTab({ roles, warehouses, currentUserId, initialQuery, notif
               onChange={(e) => setQ(e.target.value)}
               fieldClassName={styles.searchField}
             />
-            <SelectField
+            <SelectField searchable
               label="Role"
               value={roleId}
               onChange={(e) => {
