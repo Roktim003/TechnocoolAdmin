@@ -658,7 +658,7 @@ Dev uses the `bitnamilegacy/minio` image because the upstream `minio/minio` imag
 
 ## Deployment
 
-See [docs/coolify.md](docs/coolify.md) for Coolify on a Contabo VPS (two services from one image + PostgreSQL + Redis).
+Production runs on Coolify (Contabo VPS) from one compose file, [docker-compose.coolify.yml](docker-compose.coolify.yml): app + worker (one image, `docker/Dockerfile`), PostgreSQL, Redis, MinIO and a nightly backup service. Step-by-step setup, backups and restore: [docs/coolify.md](docs/coolify.md). (`docker-compose.yml` is the local stack.)
 
 ## Environment
 

@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **TechnoCool Inventory** (code name **StockBook**, still used for the repo, package, database, bucket and internal keys) — inventory management for **Techno Cool Associates**, an HVAC contractor (2 warehouses; LG / Daikin / Dunham-Bush). Next.js 15 App Router (TypeScript strict) · PostgreSQL + Prisma 6 · Zod · Redis + BullMQ · S3-compatible storage (MinIO in dev) · handwritten CSS Modules · Vitest. Locale: timezone Asia/Dhaka, currency BDT, fiscal year July–June.
 
-`README.md` is the detailed spec (business rules per module, permissions tables, endpoints, env vars). Read the relevant module section before changing behaviour there. `docs/coolify.md` covers deployment.
+`README.md` is the detailed spec (business rules per module, permissions tables, endpoints, env vars). Read the relevant module section before changing behaviour there. Other docs:
+
+- `docs/coolify.md`: deployment (Coolify on a Contabo VPS, from `docker-compose.coolify.yml`; `docker-compose.yml` is the local stack). New env vars must also be added to the right services in `docker-compose.coolify.yml`.
+- `docs/mobile-app-screens.md`: screen-by-screen spec for the Android / iOS apps (same `/api/v1`, bearer auth).
+- `docs/api/StockBook-API-Mobile.md` (+ `.docx`): the API reference for the mobile developers. The live, always-current version is the OpenAPI document at `/api/v1/openapi.json` (Swagger UI at `/api/docs`). Regenerate the file docs when endpoints change.
 
 ## Commands
 
@@ -69,7 +73,7 @@ Pages live in `src/app/(app)/…`; shared components in `src/components/{ui,shel
 - **Confirmations:** never `window.confirm` / `alert`. `await confirmDialog({ title, message, confirmText, cancelText?, danger? })` (`components/ui/ConfirmDialog.tsx`, rendered by `<ConfirmHost/>` in AppShell). Name the action on the button ("Cancel count", "Remove file"), not "OK"; focus starts on the back-out button.
 - **Generated files (PDF and Excel):** never `window.open` after an `await` (browsers block it). Open `PdfViewer` with a `PdfRequest` whose `load()` starts the job and resolves `{ url, fileName }` when ready (documents: `waitForDocument(jobId, …)` from `src/lib/documents.ts`; report exports: poll `/exports/:jobId`). `format: "xlsx"` shows Excel in `SpreadsheetView` (ExcelJS loaded on demand; merges, frozen header, number formats, sheet tabs, first 2,000 rows). For a plain download use `downloadFile()` from `src/lib/download.ts`.
 - **Popovers** (Select menus, ProductSelect panel, DateInput calendar) are portalled to `<body>` and positioned **absolutely in page coordinates** (`rect + window.scrollY`), so they scroll with the page and aren't clipped by table scroll areas. Don't use `position: fixed` + scroll listeners for them.
-- **Notifications:** the top-bar `NotificationBell` polls `/notifications/unread-count`, shows the count in the tab title, and (opt-in per browser, `src/lib/browser-popups.ts`) shows desktop pop-ups for new notifications while no StockBook tab has focus. No service worker: closed tabs get nothing.
+- **Notifications in the browser:** the top-bar `NotificationBell` polls `/notifications/unread-count`, shows the count in the tab title, and (opt-in per browser, `src/lib/browser-popups.ts`) shows desktop pop-ups for new notifications while no app tab has focus. No service worker: closed tabs get nothing.
 
 ### Forms and validation
 
@@ -88,6 +92,7 @@ Pages live in `src/app/(app)/…`; shared components in `src/components/{ui,shel
 - Stock-changing POSTs **require** an `Idempotency-Key` header.
 - **Audit:** mutating services write the audit row in the **same transaction** as the change.
 - **Notifications / change events** are published **after** the transaction commits (`notifications().service.publish(...)`; new types go in `NOTIFICATION_TYPES`). Data-changed events (`src/shared/events/change-events.ts`) clear the dashboard cache.
+- **Notification channels:** every notification is stored in-app (the bell); email goes out per the user's preference (`SMTP_*`, sent by the worker, logged in `EmailLog`); phone push goes through Firebase Cloud Messaging: `publish()` queues one job per registered phone (`PushDevice`, `POST/DELETE /push-devices`) on the `push` queue, and only the worker talks to FCM. Push is off while `FCM_SERVICE_ACCOUNT` is empty (set it on the app **and** the worker); tokens FCM reports dead are deleted.
 - **Reporting is read-only**: queries run in `READ ONLY` transactions with a statement timeout, aggregate/page in SQL, and never call other modules' write services. Adding a report: see README "Adding a report" (`defineReport` + `REPORTS` registry + fixture test).
 - Products are never deleted (DISCONTINUED); product codes are immutable.
 - Storage bucket is private; files are served only through authenticated routes. Uploaded images are validated by content with sharp.
@@ -100,6 +105,8 @@ API envelope: success `{ data, meta? }`, error `{ error: { code, message, detail
 - npm 11+ blocks install scripts unless listed in `package.json#allowScripts`; update that list when bumping Prisma/esbuild/sharp versions.
 - Default dev admin: `admin` / `ChangeMe123!` (seed only creates it if missing). Seeded roles: Admin, Accounts, Manager, Store Manager (README has each module's permission table).
 - **PDF rendering on Windows dev machines** uses the installed Chrome/Edge (`PDF_BROWSER_PATH` overrides). If PDFs fail with "Failed to launch the browser process: Code: 0", Edge has a pending update: close all Edge windows (or reboot) and try again.
-- **Email in dev:** set `SMTP_HOST=localhost`, `SMTP_PORT=1025` to send through the Mailpit container (inbox http://localhost:8025). With `SMTP_HOST` empty, emails are skipped.
+- **Email:** nodemailer over SMTP (`notifications/infrastructure/smtp-mailer.ts`), sent only by the worker from the `email` queue (`EMAIL_MAX_ATTEMPTS` retries, exponential backoff from `EMAIL_RETRY_DELAY_MS`), every send logged in `EmailLog` (SENT / FAILED / SKIPPED). With `SMTP_HOST` empty, emails are logged as SKIPPED. A user gets an email only if their account has an email address and that notification type's email preference is on (defaults in `notifications/domain/types.ts`). Env changes need an app **and** worker restart.
+  - Dev: `SMTP_HOST=localhost`, `SMTP_PORT=1025` sends to the Mailpit container (inbox http://localhost:8025).
+  - Gmail / Google Workspace: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_SECURE=true`, `SMTP_USER=<address>`, `SMTP_PASSWORD=<16-letter app password>` (needs 2-Step Verification; the normal password is refused), `SMTP_FROM="TechnoCool Inventory <same address>"` (Gmail rewrites other senders). Limits about 500 emails/day (Gmail) or 2,000/day (Workspace). In production set these in the Coolify environment.
 - **Windows shell:** don't rewrite source files with PowerShell `Get-Content -Raw` / `Set-Content` (Windows PowerShell 5.1 reads UTF-8 as ANSI and adds a BOM, corrupting `৳`, `—`, `·`). Use the editor tools or Node scripts.
 - After UI changes, check the browser console for hydration warnings (Next shows "1 Issue" in dev) and try the screen at phone width.
