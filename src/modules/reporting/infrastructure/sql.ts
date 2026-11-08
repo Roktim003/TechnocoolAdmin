@@ -8,7 +8,8 @@ import { ReportErrors } from "../domain/errors";
  * business data even by mistake, and a runaway query is cancelled with a clear error.
  */
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.REPORT_QUERY_TIMEOUT_MS ?? 30_000);
+// `||` so an empty or invalid value falls back to 30 s instead of becoming 0 (no timeout).
+const DEFAULT_TIMEOUT_MS = Number(process.env.REPORT_QUERY_TIMEOUT_MS) || 30_000;
 let timeoutMs = DEFAULT_TIMEOUT_MS;
 /** Tests shorten the timeout to prove the error path (null restores the default). */
 export function setQueryTimeoutMs(ms: number | null) {
