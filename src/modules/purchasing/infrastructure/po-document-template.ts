@@ -1,4 +1,4 @@
-import { LOGO_DATA_URI } from "@/shared/brand/logo-data";
+import { LETTERHEAD_CSS, LETTERHEAD_FOOT_CSS, onLetterhead } from "@/shared/brand/letterhead";
 import type { PoRecord } from "../application/ports";
 
 const esc = (v: unknown) =>
@@ -16,8 +16,8 @@ const qty = (v: string) => (v.includes(".") ? v.replace(/\.?0+$/, "") : v);
 const trimPct = (v: string) => v.replace(/\.?0+$/, "");
 
 /**
- * Printable purchase order (Carbon-style: plain white page, IBM Plex, a 2px rule under the
- * header, grey table head). Company header, supplier block, delivery details, lines, totals,
+ * Printable purchase order on the company pad (letterhead): IBM Plex, a 2px rule under the
+ * header, grey table head. Title, supplier block, delivery details, lines, totals,
  * terms and signature lines. `showPrices` is off for internal copies printed without seeCost;
  * the copy emailed to the supplier always has prices. Amounts are written with the currency
  * code (the taka sign isn't in every PDF font).
@@ -57,17 +57,34 @@ export function renderPoHtml(po: PoRecord, opts: { showPrices: boolean; companyN
       : `<tr class="grand"><td>Total (${esc(cur)})</td><td class="num">${money(po.total)}</td></tr>
          <tr><td class="muted">≈ BDT at ${esc(po.exchangeRate)}</td><td class="num muted">${money(po.totalBdt)}</td></tr>`;
 
+  const content = `<div class="head">
+  <h1>Purchase Order</h1>
+  <div class="no">${esc(no)}${po.revision ? ` · Rev ${po.revision}` : ""}</div>
+</div>
+<div class="blocks">
+  <div class="supplier"><span class="label">Supplier</span>${supplierLines.map((x, i) => (i === 0 ? `<b>${esc(x)}</b>` : `<div>${esc(x)}</div>`)).join("")}<div class="mono note">${esc(s.code)}</div></div>
+  <div class="meta">${meta
+    .filter(([, v]) => v)
+    .map(([k, v]) => `<div><span class="label">${esc(k)}</span>${esc(v)}</div>`)
+    .join("")}</div>
+</div>
+<table class="lines">
+  <thead><tr><th>#</th><th>Code</th><th>Item</th><th class="num">Qty</th>${p ? `<th class="num">Unit price (${esc(cur)})</th><th class="num">Amount (${esc(cur)})</th>` : ""}</tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+${totals ? `<table class="totals">${totals}</table>` : ""}
+${po.terms ? `<div class="terms"><span class="label">Terms &amp; conditions</span><p>${esc(po.terms)}</p></div>` : ""}
+${po.notes ? `<div class="terms"><span class="label">Notes</span><p>${esc(po.notes)}</p></div>` : ""}
+<div class="sign"><div>Prepared by<br>${esc(po.createdBy.name)}</div><div>Approved by${po.approvedBy ? `<br>${esc(po.approvedBy.name)}` : ""}</div><div>Supplier acceptance</div></div>`;
+
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Purchase Order ${esc(no)}</title>
 <style>
-  @page { size: A4; margin: 16mm 14mm; }
+  ${LETTERHEAD_CSS}
   * { box-sizing: border-box; }
   body { font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 11px; color: #161616; margin: 0; }
-  .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #161616; padding-bottom: 10px; }
-  .company { font-size: 16px; font-weight: 600; }
-  .brand { display: flex; align-items: center; gap: 10px; }
-  .logo { width: 46px; height: 46px; flex: none; border-radius: 4px; }
-  h1 { font-size: 20px; font-weight: 400; margin: 0; text-align: right; }
+  .head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #161616; padding-bottom: 10px; }
+  h1 { font-size: 20px; font-weight: 400; margin: 0; }
   .no { font-family: "IBM Plex Mono", Consolas, monospace; font-size: 13px; text-align: right; margin-top: 4px; }
   .blocks { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 14px 0; }
   .label { display: block; font-size: 9px; color: #525252; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 2px; }
@@ -87,30 +104,12 @@ export function renderPoHtml(po: PoRecord, opts: { showPrices: boolean; companyN
   .terms p { white-space: pre-wrap; margin: 2px 0 0; }
   .sign { display: flex; justify-content: space-between; margin-top: 64px; }
   .sign div { width: 30%; border-top: 1px solid #161616; padding-top: 4px; text-align: center; color: #525252; }
-  .foot { position: fixed; bottom: 0; left: 0; right: 0; font-size: 8px; color: #8d8d8d; display: flex; justify-content: space-between; }
+  .foot { position: fixed; ${LETTERHEAD_FOOT_CSS} font-size: 8px; color: #8d8d8d; display: flex; justify-content: space-between; }
   .watermark { position: fixed; top: 40%; left: 0; right: 0; text-align: center; font-size: 64px; color: rgba(218,30,40,.12); transform: rotate(-20deg); font-weight: 600; }
 </style></head>
 <body>
-${watermark}
-<div class="head">
-  <div class="brand"><img class="logo" src="${LOGO_DATA_URI}" alt=""><div><div class="company">${esc(opts.companyName)}</div>${opts.companyAddress ? `<div>${esc(opts.companyAddress)}</div>` : ""}</div></div>
-  <div><h1>Purchase Order</h1><div class="no">${esc(no)}${po.revision ? ` · Rev ${po.revision}` : ""}</div></div>
-</div>
-<div class="blocks">
-  <div class="supplier"><span class="label">Supplier</span>${supplierLines.map((x, i) => (i === 0 ? `<b>${esc(x)}</b>` : `<div>${esc(x)}</div>`)).join("")}<div class="mono note">${esc(s.code)}</div></div>
-  <div class="meta">${meta
-    .filter(([, v]) => v)
-    .map(([k, v]) => `<div><span class="label">${esc(k)}</span>${esc(v)}</div>`)
-    .join("")}</div>
-</div>
-<table class="lines">
-  <thead><tr><th>#</th><th>Code</th><th>Item</th><th class="num">Qty</th>${p ? `<th class="num">Unit price (${esc(cur)})</th><th class="num">Amount (${esc(cur)})</th>` : ""}</tr></thead>
-  <tbody>${rows}</tbody>
-</table>
-${totals ? `<table class="totals">${totals}</table>` : ""}
-${po.terms ? `<div class="terms"><span class="label">Terms &amp; conditions</span><p>${esc(po.terms)}</p></div>` : ""}
-${po.notes ? `<div class="terms"><span class="label">Notes</span><p>${esc(po.notes)}</p></div>` : ""}
-<div class="sign"><div>Prepared by<br>${esc(po.createdBy.name)}</div><div>Approved by${po.approvedBy ? `<br>${esc(po.approvedBy.name)}` : ""}</div><div>Supplier acceptance</div></div>
+${onLetterhead(content)}
 <div class="foot"><span>TechnoCool Inventory · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(no)}</span></div>
+${watermark}
 </body></html>`;
 }

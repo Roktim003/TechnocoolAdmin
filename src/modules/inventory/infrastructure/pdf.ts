@@ -22,10 +22,8 @@ export function browserPath(): string | null {
 }
 
 export interface PdfOptions {
-  landscape?: boolean;
-  /** Chromium footer template (e.g. page "x of y"); needs a bottom margin. */
+  /** Chromium footer template (e.g. page "x of y"), drawn over the bottom of every page. */
   footerTemplate?: string;
-  margin?: { top?: string; right?: string; bottom?: string; left?: string };
 }
 
 export async function htmlToPdf(html: string, opts: PdfOptions = {}): Promise<Uint8Array> {
@@ -45,10 +43,9 @@ export async function htmlToPdf(html: string, opts: PdfOptions = {}): Promise<Ui
     const pdf = await page.pdf({
       format: "A4",
       printBackground: true,
-      preferCSSPageSize: !opts.landscape && !opts.footerTemplate,
-      landscape: opts.landscape ?? false,
+      // Size, orientation and margins come from the document's own @page rule.
+      preferCSSPageSize: true,
       ...(opts.footerTemplate ? { displayHeaderFooter: true, headerTemplate: "<span></span>", footerTemplate: opts.footerTemplate } : {}),
-      ...(opts.margin ? { margin: opts.margin } : {}),
     });
     return new Uint8Array(pdf);
   } finally {

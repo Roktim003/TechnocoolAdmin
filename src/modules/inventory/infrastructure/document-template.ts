@@ -1,4 +1,4 @@
-import { LOGO_DATA_URI } from "@/shared/brand/logo-data";
+import { LETTERHEAD_CSS, LETTERHEAD_FOOT_CSS, onLetterhead } from "@/shared/brand/letterhead";
 import type { DocumentKind } from "../application/dto";
 import type { EntryRecord } from "../application/ports";
 import { EMPTY_SHIPMENT, IMPORT_DOC_META, IMPORT_DOC_TYPES, type AttachmentDocType, type ImportDocType, type ImportShipmentData } from "../domain/import-docs";
@@ -147,17 +147,34 @@ export function renderDocumentHtml(e: EntryRecord, kind: DocumentKind, opts: { s
           .join("")}` : ""}<tr class="grand"><td>Total cost (BDT)</td><td class="num">${money(e.costTotal)}</td></tr>`
       : "";
 
+  const content = `<div class="head">
+  <div><h1>${esc(title)}</h1><div>${esc(e.warehouse.name)}</div></div>
+  <div class="no">${esc(e.number ?? e.draftRef)}</div>
+</div>
+<div class="meta">
+  <div><span>Date</span>${esc(e.entryDate)}</div>
+  <div><span>Type</span>${esc(ENTRY_TYPE_META[e.type].label)}</div>
+  ${party.map(([k, v]) => `<div><span>${esc(k)}</span>${v.includes("<br>") ? v : esc(v)}</div>`).join("")}
+  ${refs.map(([k, v]) => `<div><span>${esc(k)}</span>${esc(v)}</div>`).join("")}
+  ${e.reversalOf ? `<div><span>Reverses</span>${esc(e.reversalOf.number)}</div>` : ""}
+</div>
+<table class="lines">
+  <thead><tr><th>#</th><th>Code</th><th>Item</th><th class="num">Qty</th>${isImport ? "<th>Origin</th>" : ""}${priced ? `<th class="num">${priceHead} (BDT)</th><th class="num">Amount (BDT)</th>` : ""}</tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+${totals ? `<table class="totals">${totals}</table>` : ""}
+${isImport ? shipmentBlock(e.importShipment, opts.importFiles ?? [], opts.showCost) : ""}
+${e.description || e.notes ? `<div class="notes">${esc([e.description, e.notes].filter(Boolean).join("\n"))}</div>` : ""}
+<div class="sign"><div>Prepared by<br>${esc(e.createdBy.name)}</div><div>${isChallan ? "Received by" : "Checked by"}${e.verifiedBy ? `<br>${esc(e.verifiedBy.name)}` : ""}</div><div>Authorised signature</div></div>`;
+
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${esc(title)} ${esc(e.number ?? e.draftRef)}</title>
 <style>
-  @page { size: A4; margin: 16mm 14mm; }
+  ${LETTERHEAD_CSS}
   * { box-sizing: border-box; }
   body { font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 11px; color: #161616; margin: 0; }
-  .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #161616; padding-bottom: 10px; }
-  .company { font-size: 16px; font-weight: 600; }
-  .brand { display: flex; align-items: center; gap: 10px; }
-  .logo { width: 46px; height: 46px; flex: none; border-radius: 4px; }
-  h1 { font-size: 20px; font-weight: 400; margin: 0; text-align: right; }
+  .head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #161616; padding-bottom: 10px; }
+  h1 { font-size: 20px; font-weight: 400; margin: 0; }
   .no { font-family: "IBM Plex Mono", Consolas, monospace; font-size: 13px; text-align: right; margin-top: 4px; }
   .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin: 14px 0; }
   .meta div span { display: block; font-size: 9px; color: #525252; text-transform: uppercase; letter-spacing: .3px; }
@@ -175,30 +192,12 @@ export function renderDocumentHtml(e: EntryRecord, kind: DocumentKind, opts: { s
   .notes { margin-top: 14px; white-space: pre-wrap; }
   .sign { display: flex; justify-content: space-between; margin-top: 60px; }
   .sign div { width: 30%; border-top: 1px solid #161616; padding-top: 4px; text-align: center; color: #525252; }
-  .foot { position: fixed; bottom: 0; left: 0; right: 0; font-size: 8px; color: #8d8d8d; display: flex; justify-content: space-between; }
+  .foot { position: fixed; ${LETTERHEAD_FOOT_CSS} font-size: 8px; color: #8d8d8d; display: flex; justify-content: space-between; }
   .watermark { position: fixed; top: 40%; left: 0; right: 0; text-align: center; font-size: 72px; color: rgba(218,30,40,.12); transform: rotate(-20deg); font-weight: 600; }
 </style></head>
 <body>
-${statusNote}
-<div class="head">
-  <div class="brand"><img class="logo" src="${LOGO_DATA_URI}" alt=""><div><div class="company">${esc(opts.companyName)}</div><div>${esc(e.warehouse.name)}</div></div></div>
-  <div><h1>${esc(title)}</h1><div class="no">${esc(e.number ?? e.draftRef)}</div></div>
-</div>
-<div class="meta">
-  <div><span>Date</span>${esc(e.entryDate)}</div>
-  <div><span>Type</span>${esc(ENTRY_TYPE_META[e.type].label)}</div>
-  ${party.map(([k, v]) => `<div><span>${esc(k)}</span>${v.includes("<br>") ? v : esc(v)}</div>`).join("")}
-  ${refs.map(([k, v]) => `<div><span>${esc(k)}</span>${esc(v)}</div>`).join("")}
-  ${e.reversalOf ? `<div><span>Reverses</span>${esc(e.reversalOf.number)}</div>` : ""}
-</div>
-<table class="lines">
-  <thead><tr><th>#</th><th>Code</th><th>Item</th><th class="num">Qty</th>${isImport ? "<th>Origin</th>" : ""}${priced ? `<th class="num">${priceHead} (BDT)</th><th class="num">Amount (BDT)</th>` : ""}</tr></thead>
-  <tbody>${rows}</tbody>
-</table>
-${totals ? `<table class="totals">${totals}</table>` : ""}
-${isImport ? shipmentBlock(e.importShipment, opts.importFiles ?? [], opts.showCost) : ""}
-${e.description || e.notes ? `<div class="notes">${esc([e.description, e.notes].filter(Boolean).join("\n"))}</div>` : ""}
-<div class="sign"><div>Prepared by<br>${esc(e.createdBy.name)}</div><div>${isChallan ? "Received by" : "Checked by"}${e.verifiedBy ? `<br>${esc(e.verifiedBy.name)}` : ""}</div><div>Authorised signature</div></div>
+${onLetterhead(content)}
 <div class="foot"><span>TechnoCool Inventory · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(e.number ?? e.draftRef)}</span></div>
+${statusNote}
 </body></html>`;
 }

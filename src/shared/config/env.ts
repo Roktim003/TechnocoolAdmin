@@ -98,7 +98,10 @@ let cached: Env | undefined;
 /** Validated environment. Parsed lazily so build steps that never touch config don't need every variable. */
 export function env(): Env {
   if (!cached) {
-    const parsed = EnvSchema.safeParse(process.env);
+    // An empty variable counts as unset, so its default applies (Coolify passes every variable
+    // it knows to every service, empty ones as ""; `Number("")` would otherwise become 0).
+    const set = Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined && v.trim() !== ""));
+    const parsed = EnvSchema.safeParse(set);
     if (!parsed.success) {
       const issues = parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");
       throw new Error(`Invalid environment configuration:\n${issues}`);

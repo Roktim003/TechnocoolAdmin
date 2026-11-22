@@ -1,4 +1,4 @@
-import { LOGO_DATA_URI } from "@/shared/brand/logo-data";
+import { letterheadCss, letterheadPageFooter, onLetterhead } from "@/shared/brand/letterhead";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { htmlToPdf } from "@/modules/inventory/infrastructure/pdf";
@@ -7,9 +7,10 @@ import type { ReportFileInput } from "../application/ports";
 import { chartSvg } from "./svg-chart";
 
 /**
- * PDF export: an HTML page rendered by headless Chromium in the worker. IBM Plex Sans is embedded
- * (the page loads nothing from the network); the table header repeats on every page and the footer
- * carries "Page x of y" and the generated time.
+ * PDF export: an HTML page rendered by headless Chromium in the worker, on the company pad
+ * (portrait, or the landscape pad for wide reports). IBM Plex Sans is embedded (the page loads
+ * nothing from the network); the table header repeats on every page and the footer line carries
+ * the title, the generated time and "Page x of y".
  */
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -56,18 +57,26 @@ export async function reportHtml(input: ReportFileInput): Promise<string> {
         .join("")}</tr></tfoot>`
     : "";
   const filters = input.filters.length ? input.filters.map((f) => `<span><em>${esc(f.label)}:</em> ${esc(f.value)}</span>`).join("") : "<span>No filters</span>";
+  const orientation = input.meta.landscape ? "landscape" : "portrait";
+  const generated = esc(formatDateValue(input.generatedAt.toISOString(), true));
   const chart = input.chart ? `<section class="chart"><h2>${esc(input.chart.title)}</h2>${chartSvg(input.chart)}</section>` : "";
+
+  const content = `  <header><h1>${esc(input.meta.title)}</h1>
+  <div class="gen">Generated ${generated} (Asia/Dhaka)<br>by ${esc(input.generatedBy)}</div></header>
+  <div class="filters">${filters}</div>
+  ${tiles ? `<div class="tiles">${tiles}</div>` : ""}
+  ${chart}
+  <table><thead><tr>${cols.map((c) => `<th class="${c.align === "end" ? "num" : ""}">${esc(c.label)}</th>`).join("")}</tr></thead>
+  <tbody>${body.length ? body.join("") : `<tr><td class="empty" colspan="${Math.max(1, cols.length)}">No rows for these filters.</td></tr>`}</tbody>${body.length ? totalsRow : ""}</table>
+  ${input.truncatedAt ? `<p class="note">The PDF shows the first ${input.truncatedAt.toLocaleString("en-IN")} rows; export to Excel for all of them. Totals cover every row.</p>` : ""}`;
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(input.meta.title)}</title><style>
   ${fonts()}
-  @page { size: A4 ${input.meta.landscape ? "landscape" : "portrait"}; }
+  ${letterheadCss(orientation)}
   * { box-sizing: border-box; }
   body { font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 9.5px; color: #161616; margin: 0; }
   header { border-bottom: 2px solid #161616; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; }
-  .company { font-size: 14px; font-weight: 600; }
-  .brand { display: flex; align-items: center; gap: 10px; }
-  .logo { width: 46px; height: 46px; flex: none; border-radius: 4px; }
-  h1 { font-size: 18px; font-weight: 400; margin: 2px 0 0; }
+  h1 { font-size: 18px; font-weight: 400; margin: 0; }
   .gen { font-size: 8.5px; color: #525252; text-align: right; }
   .filters { font-size: 8.5px; color: #525252; margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
   .filters em { font-style: normal; font-weight: 600; color: #161616; }
@@ -89,20 +98,12 @@ export async function reportHtml(input: ReportFileInput): Promise<string> {
   .empty { padding: 16px; text-align: center; color: #525252; }
   .note { margin-top: 8px; font-size: 8.5px; color: #8a3800; }
   </style></head><body>
-  <header><div class="brand"><img class="logo" src="${LOGO_DATA_URI}" alt=""><div><div class="company">TechnoCool Inventory${input.companyName && input.companyName !== "TechnoCool Inventory" ? ` · ${esc(input.companyName)}` : ""}</div><h1>${esc(input.meta.title)}</h1></div></div>
-  <div class="gen">Generated ${esc(formatDateValue(input.generatedAt.toISOString(), true))} (Asia/Dhaka)<br>by ${esc(input.generatedBy)}</div></header>
-  <div class="filters">${filters}</div>
-  ${tiles ? `<div class="tiles">${tiles}</div>` : ""}
-  ${chart}
-  <table><thead><tr>${cols.map((c) => `<th class="${c.align === "end" ? "num" : ""}">${esc(c.label)}</th>`).join("")}</tr></thead>
-  <tbody>${body.length ? body.join("") : `<tr><td class="empty" colspan="${Math.max(1, cols.length)}">No rows for these filters.</td></tr>`}</tbody>${body.length ? totalsRow : ""}</table>
-  ${input.truncatedAt ? `<p class="note">The PDF shows the first ${input.truncatedAt.toLocaleString("en-IN")} rows; export to Excel for all of them. Totals cover every row.</p>` : ""}
+  ${onLetterhead(content, orientation)}
   </body></html>`;
 }
 
 export async function writePdf(input: ReportFileInput): Promise<Uint8Array> {
-  const html = await reportHtml(input);
   const generated = esc(formatDateValue(input.generatedAt.toISOString(), true));
-  const footerTemplate = `<div style="font-family:Arial,sans-serif;font-size:7px;color:#8d8d8d;width:100%;padding:0 12mm;display:flex;justify-content:space-between;"><span>${esc(input.meta.title)} · generated ${generated}</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
-  return htmlToPdf(html, { landscape: input.meta.landscape, footerTemplate, margin: { top: "12mm", right: "12mm", bottom: "14mm", left: "12mm" } });
+  const footerTemplate = letterheadPageFooter(`${esc(input.meta.title)} · generated ${generated}`, input.meta.landscape ? "landscape" : "portrait");
+  return htmlToPdf(await reportHtml(input), { footerTemplate });
 }

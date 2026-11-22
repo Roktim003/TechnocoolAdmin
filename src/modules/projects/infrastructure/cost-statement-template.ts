@@ -1,4 +1,4 @@
-import { LOGO_DATA_URI } from "@/shared/brand/logo-data";
+import { LETTERHEAD_CSS, LETTERHEAD_FOOT_CSS, onLetterhead } from "@/shared/brand/letterhead";
 import type { MaterialProduct } from "../application/costing.service";
 import type { CostRecord, ProjectRecord } from "../application/ports";
 import type { ProjectSummary } from "../domain/rules";
@@ -81,39 +81,9 @@ ${overheadRows ? `<table class="lines"><thead><tr><th>Date</th><th>Category</th>
   <tr class="grand"><td>Full cost (BDT)</td><td class="num">${money(s.fullCost)}</td></tr>`
     : "";
 
-  return `<!doctype html>
-<html><head><meta charset="utf-8"><title>Cost statement ${esc(p.code)}</title>
-<style>
-  @page { size: A4; margin: 16mm 14mm; }
-  * { box-sizing: border-box; }
-  body { font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 11px; color: #161616; margin: 0; }
-  .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #161616; padding-bottom: 10px; }
-  .company { font-size: 16px; font-weight: 600; }
-  .brand { display: flex; align-items: center; gap: 10px; }
-  .logo { width: 46px; height: 46px; flex: none; border-radius: 4px; }
-  h1 { font-size: 20px; font-weight: 400; margin: 0; text-align: right; }
-  .no { font-family: "IBM Plex Mono", Consolas, monospace; font-size: 13px; text-align: right; margin-top: 4px; }
-  .title { font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
-  .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 16px; background: #f4f4f4; padding: 10px 12px; }
-  .label { display: block; font-size: 9px; color: #525252; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 2px; }
-  .section { margin-top: 16px; }
-  table.lines { width: 100%; border-collapse: collapse; margin-top: 4px; }
-  .lines th { background: #e0e0e0; text-align: left; padding: 6px; font-weight: 600; }
-  .lines td { border-bottom: 1px solid #e0e0e0; padding: 6px; vertical-align: top; }
-  .num { text-align: right; white-space: nowrap; }
-  .mono { font-family: "IBM Plex Mono", Consolas, monospace; }
-  .note, .muted { color: #525252; font-size: 9px; }
-  .empty { color: #525252; padding: 6px 0; }
-  table.totals { margin: 8px 0 0 auto; min-width: 300px; border-collapse: collapse; }
-  .totals td { padding: 4px 6px; }
-  .totals .grand td { border-top: 2px solid #161616; font-weight: 600; }
-  .neg { color: #da1e28; }
-  .foot { position: fixed; bottom: 0; left: 0; right: 0; font-size: 8px; color: #8d8d8d; display: flex; justify-content: space-between; }
-</style></head>
-<body>
-<div class="head">
-  <div class="brand"><img class="logo" src="${LOGO_DATA_URI}" alt=""><div><div class="company">${esc(opts.companyName)}</div>${opts.companyAddress ? `<div>${esc(opts.companyAddress)}</div>` : ""}</div></div>
-  <div><h1>Project cost statement</h1><div class="no">${esc(p.code)}</div></div>
+  const content = `<div class="head">
+  <h1>Project cost statement</h1>
+  <div class="no">${esc(p.code)}</div>
 </div>
 <div class="title">${esc(p.name)}</div>
 <div class="meta">${meta
@@ -143,7 +113,36 @@ ${overheads}
   <tr class="grand"><td>${oh ? "Direct cost" : "Total cost"} (BDT)</td><td class="num">${money(s.directCost)}</td></tr>
   ${overheadTotals}
 </table>
-${margin}
+${margin}`;
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Cost statement ${esc(p.code)}</title>
+<style>
+  ${LETTERHEAD_CSS}
+  * { box-sizing: border-box; }
+  body { font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 11px; color: #161616; margin: 0; }
+  .head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #161616; padding-bottom: 10px; }
+  h1 { font-size: 20px; font-weight: 400; margin: 0; }
+  .no { font-family: "IBM Plex Mono", Consolas, monospace; font-size: 13px; text-align: right; margin-top: 4px; }
+  .title { font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
+  .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 16px; background: #f4f4f4; padding: 10px 12px; }
+  .label { display: block; font-size: 9px; color: #525252; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 2px; }
+  .section { margin-top: 16px; }
+  table.lines { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  .lines th { background: #e0e0e0; text-align: left; padding: 6px; font-weight: 600; }
+  .lines td { border-bottom: 1px solid #e0e0e0; padding: 6px; vertical-align: top; }
+  .num { text-align: right; white-space: nowrap; }
+  .mono { font-family: "IBM Plex Mono", Consolas, monospace; }
+  .note, .muted { color: #525252; font-size: 9px; }
+  .empty { color: #525252; padding: 6px 0; }
+  table.totals { margin: 8px 0 0 auto; min-width: 300px; border-collapse: collapse; }
+  .totals td { padding: 4px 6px; }
+  .totals .grand td { border-top: 2px solid #161616; font-weight: 600; }
+  .neg { color: #da1e28; }
+  .foot { position: fixed; ${LETTERHEAD_FOOT_CSS} font-size: 8px; color: #8d8d8d; display: flex; justify-content: space-between; }
+</style></head>
+<body>
+${onLetterhead(content)}
 <div class="foot"><span>TechnoCool Inventory · printed by ${esc(opts.printedBy)} · ${esc(opts.printedAt)}</span><span>${esc(p.code)}</span></div>
 </body></html>`;
 }
