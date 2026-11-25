@@ -8,6 +8,12 @@ export interface CatalogCaps {
   canManage: boolean;
   /** role flag seeCost */
   seeCost: boolean;
+  /** inventory = FULL and seeCost: may post opening stock with a new product (it needs a unit cost). */
+  canAddOpeningStock: boolean;
+  /** inventory ≥ VIEW: the product page shows its stock per warehouse. */
+  canSeeStock: boolean;
+  /** inventory ≥ CREATE: may create stock entries. */
+  canAddStock: boolean;
 }
 
 export const STATUS_LABEL = { ACTIVE: "Active", DISCONTINUED: "Discontinued" } as const;

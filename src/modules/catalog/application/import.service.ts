@@ -2,7 +2,7 @@ import { ValidationError } from "@/shared/errors/app-error";
 import type { SortField } from "@/shared/pagination/list-query";
 import { assertPurchaseUnit, nameKey } from "../domain/rules";
 import type { ProductFields } from "../domain/types";
-import { CreateProductSchema, type CreateProductInput, type ImportMode, type ImportResult, type ImportRowError, type ProductFilters } from "./dto";
+import { ImportProductRowSchema, type ImportProductRowInput, type ImportMode, type ImportResult, type ImportRowError, type ProductFilters } from "./dto";
 import { IMPORT_COLUMNS, MAX_EXPORT_ROWS, MAX_IMPORT_ROWS, normalizeHeader } from "./import-columns";
 import { fieldsFromCreate, productSnapshot, ZERO_COST } from "./product.service";
 import type { CatalogActor, CatalogUnitOfWork, FileStore, SheetRow, Spreadsheet } from "./ports";
@@ -109,7 +109,7 @@ export class ImportService {
     const categoryByName = new Map(categories.map((c) => [nameKey(c.name), c]));
     const unitByCode = new Map(units.map((u) => [u.code.toLowerCase(), u]));
 
-    const candidates: { row: number; input: CreateProductInput }[] = [];
+    const candidates: { row: number; input: ImportProductRowInput }[] = [];
     for (const { rowNumber, values } of rows) {
       const get = (key: string) => values[normalizeHeader(header(key))];
       const rowErrors: ImportRowError[] = [];
@@ -142,7 +142,7 @@ export class ImportService {
       if (!actor.canSeeCost) delete raw.purchaseCost;
       else if (raw.purchaseCost === undefined) err("purchaseCost", "Purchase cost is required.");
 
-      const parsed = CreateProductSchema.safeParse(raw);
+      const parsed = ImportProductRowSchema.safeParse(raw);
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
           const key = String(issue.path[0] ?? "row");

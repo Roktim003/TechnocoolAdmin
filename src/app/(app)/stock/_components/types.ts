@@ -109,11 +109,18 @@ export interface ProjectDto {
 
 export interface StockLevelDto {
   product: { id: string; code: string; name: string; unitCode: string; minStockLevel: string | null; trackSerial: boolean; status: string; catalogName: string; categoryName: string };
-  warehouses: { warehouseId: string; code: string; good: string; damaged: string; reserved: string }[];
-  good: string;
+  warehouses: { warehouseId: string; code: string; good: string; damaged: string; reserved: string; available: string }[];
+  /** GOOD stock on hand, all warehouses in scope. */
+  onHand: string;
+  /** onHand − reserved. */
+  available: string;
   damaged: string;
   reserved: string;
   inTransit: string;
+  /** onHand + damaged + in transit. */
+  total: string;
+  /** Available below the product's minimum stock level. */
+  belowMinimum: boolean;
   avgCost?: string;
   stockValue?: string;
 }

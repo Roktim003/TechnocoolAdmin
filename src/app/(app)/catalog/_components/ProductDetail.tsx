@@ -13,6 +13,7 @@ import { Tag } from "@/components/ui/Tag";
 import { api, errorMessage, type Page } from "@/lib/api-client";
 import { formatDateTime, formatMoney } from "@/shared/time/format";
 import { PriceHistoryTable } from "../../purchases/_components/PriceHistoryTable";
+import { ProductStock } from "./ProductStock";
 import { SOURCE_LABEL, STATUS_LABEL, type CatalogCaps, type ProductDto } from "./types";
 import styles from "./catalog.module.css";
 
@@ -141,19 +142,45 @@ function History({ productId }: { productId: string }) {
   );
 }
 
-export function ProductDetail({ caps, initial, saved, photoError }: { caps: CatalogCaps; initial: ProductDto; saved: boolean; photoError: string | null }) {
+/** The notice shown after saving a new product: photo upload and opening stock run after the product is created. */
+function savedNotice(saved: boolean, photoError: string | null, stockPosted: string | null, stockError: string | null): { kind: "success" | "error" | "warning"; title: string; message?: string } | null {
+  const posted = stockPosted ? `Opening stock posted: ${stockPosted}.` : "";
+  if (stockError) {
+    return {
+      kind: "warning",
+      title: "Product saved, but opening stock was not posted",
+      message: [posted, stockError, "Add it from Stock in / out → New entry → Opening stock.", photoError ? `Photos were not uploaded either: ${photoError}` : ""].filter(Boolean).join(" "),
+    };
+  }
+  if (photoError) return { kind: "warning", title: "Product saved, but photos were not uploaded", message: [`${photoError} Open Edit to try again.`, posted].filter(Boolean).join(" ") };
+  return saved ? { kind: "success", title: "Product saved", ...(posted ? { message: posted } : {}) } : null;
+}
+
+export function ProductDetail({
+  caps,
+  initial,
+  saved,
+  photoError,
+  stockPosted = null,
+  stockError = null,
+}: {
+  caps: CatalogCaps;
+  initial: ProductDto;
+  saved: boolean;
+  photoError: string | null;
+  stockPosted?: string | null;
+  stockError?: string | null;
+}) {
   const [p, setP] = useState(initial);
   const [tab, setTab] = useState<"details" | "history" | "prices">("details");
   const [photoIndex, setPhotoIndex] = useState(() => Math.max(0, initial.photos.findIndex((ph) => ph.isPrimary)));
-  const [notice, setNotice] = useState<{ kind: "success" | "error" | "warning"; title: string; message?: string } | null>(
-    photoError ? { kind: "warning", title: "Product saved, but photos were not uploaded", message: `${photoError} Open Edit to try again.` } : saved ? { kind: "success", title: "Product saved" } : null,
-  );
+  const [notice, setNotice] = useState<{ kind: "success" | "error" | "warning"; title: string; message?: string } | null>(() => savedNotice(saved, photoError, stockPosted, stockError));
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (saved || photoError) window.history.replaceState(null, "", `/catalog/${initial.id}`);
-  }, [saved, photoError, initial.id]);
+    if (saved || photoError || stockError) window.history.replaceState(null, "", `/catalog/${initial.id}`);
+  }, [saved, photoError, stockError, initial.id]);
 
   const changeStatus = useCallback(
     async (action: "discontinue" | "reactivate") => {
@@ -282,6 +309,8 @@ export function ProductDetail({ caps, initial, saved, photoError }: { caps: Cata
                 <Field label="Selling price">{formatMoney(p.sellingPrice)}</Field>
               </dl>
             </section>
+
+            {caps.canSeeStock ? <ProductStock productId={p.id} unitCode={p.unit.code} seeCost={caps.seeCost} canAddStock={caps.canAddStock} /> : null}
 
             <section className={styles.section} aria-labelledby="d-optional">
               <h2 id="d-optional" className={styles.sectionTitle}>

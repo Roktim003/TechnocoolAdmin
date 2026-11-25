@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 import { MoneySchema, QuantitySchema } from "@/shared/money/money";
-import { assertActiveRef, assertCanAddPhotos, assertCodeUnchanged, assertDeletable, assertPurchaseUnit, isValidCode, nameKey, normalizeCode } from "@/modules/catalog/domain/rules";
+import { assertActiveRef, assertCanAddPhotos, assertCodeUnchanged, codeCandidates, assertDeletable, assertPurchaseUnit, isValidCode, nameKey, normalizeCode } from "@/modules/catalog/domain/rules";
 import { CreateProductSchema } from "@/modules/catalog/application/dto";
 import { normalizeHeader } from "@/modules/catalog/application/import-columns";
 
@@ -80,12 +80,31 @@ describe("reference and photo rules", () => {
   });
 });
 
+describe("codeCandidates", () => {
+  it("makes valid codes from a model number, then numbered ones", () => {
+    const c = codeCandidates("s4 q18/kl3aa", 3);
+    expect(c).toEqual(["S4-Q18-KL3AA", "S4-Q18-KL3AA-2", "S4-Q18-KL3AA-3"]);
+    expect(c.every(isValidCode)).toBe(true);
+  });
+  it("prefixes models too short for a code and fits long ones in 31 characters", () => {
+    expect(codeCandidates("x", 1)).toEqual(["ITEM-X"]);
+    expect(codeCandidates("A".repeat(40), 12).every((x) => isValidCode(x) && x.length <= 31)).toBe(true);
+  });
+});
+
 describe("CreateProductSchema", () => {
-  const base = { code: "ab-1", name: "X", catalogId: crypto.randomUUID(), categoryId: crypto.randomUUID(), unitId: crypto.randomUUID(), sellingPrice: "10" };
+  const base = { code: "ab-1", name: "X", model: "M-1", catalogId: crypto.randomUUID(), categoryId: crypto.randomUUID(), unitId: crypto.randomUUID(), sellingPrice: "10" };
 
   it("turns blanks into null and parses booleans / enums loosely", () => {
-    const p = CreateProductSchema.parse({ ...base, model: " ", barcode: "", trackSerial: "Yes", source: "local", warrantyMonths: "24" });
-    expect(p).toMatchObject({ code: "AB-1", model: null, barcode: null, trackSerial: true, source: "LOCAL", warrantyMonths: 24 });
+    const p = CreateProductSchema.parse({ ...base, hsCode: " ", barcode: "", trackSerial: "Yes", source: "local", warrantyMonths: "24" });
+    expect(p).toMatchObject({ code: "AB-1", hsCode: null, barcode: null, trackSerial: true, source: "LOCAL", warrantyMonths: 24 });
+  });
+
+  it("needs only the item name and the model number", () => {
+    const p = CreateProductSchema.parse({ name: "X", model: "S4-Q18KL3AA", code: "", catalogId: "", categoryId: "", unitId: "", purchaseCost: "" });
+    expect(p).toMatchObject({ code: undefined, catalogId: undefined, categoryId: undefined, unitId: undefined, purchaseCost: "0.00" });
+    expect(p.sellingPrice).toBeUndefined();
+    expect(() => CreateProductSchema.parse({ name: "X", model: " " })).toThrow(ZodError);
   });
 
   it("rejects unknown fields", () => {

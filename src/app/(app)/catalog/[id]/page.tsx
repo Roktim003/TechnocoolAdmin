@@ -10,14 +10,14 @@ import { ProductDetail } from "../_components/ProductDetail";
 
 export const metadata: Metadata = { title: "Product" };
 
-export default async function ProductPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ saved?: string; photoError?: string }> }) {
+export default async function ProductPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ saved?: string; photoError?: string; stockPosted?: string; stockError?: string }> }) {
   const caps = await catalogAccess();
   if (!caps) return <AccessDenied what="Product catalog" />;
   const { id } = await params;
   if (!UuidSchema.safeParse(id).success) notFound();
   const product = await catalog().products.get(id).catch(() => null);
   if (!product) notFound();
-  const { saved, photoError } = await searchParams;
+  const { saved, photoError, stockPosted, stockError } = await searchParams;
   const dto = filterSensitiveFields(toProductDto(product), { flags: { seeCost: caps.seeCost, seeProfit: false, seeMargin: false } });
-  return <ProductDetail caps={caps} initial={dto} saved={saved === "1"} photoError={photoError ?? null} />;
+  return <ProductDetail caps={caps} initial={dto} saved={saved === "1"} photoError={photoError ?? null} stockPosted={stockPosted ?? null} stockError={stockError ?? null} />;
 }

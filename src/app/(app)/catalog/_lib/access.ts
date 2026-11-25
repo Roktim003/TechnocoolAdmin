@@ -11,5 +11,8 @@ export async function catalogAccess(): Promise<CatalogCaps | null> {
     canCreate: hasPermission(principal, "catalog", "CREATE"),
     canManage: hasPermission(principal, "catalog", "FULL"),
     seeCost: principal.flags.seeCost,
+    canAddOpeningStock: hasPermission(principal, "inventory", "FULL") && principal.flags.seeCost,
+    canSeeStock: hasPermission(principal, "inventory", "VIEW"),
+    canAddStock: hasPermission(principal, "inventory", "CREATE"),
   };
 }

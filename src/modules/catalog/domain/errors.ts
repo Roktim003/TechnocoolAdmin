@@ -1,4 +1,4 @@
-import { BusinessRuleError, ConflictError, ValidationError } from "@/shared/errors/app-error";
+import { BusinessRuleError, ConflictError } from "@/shared/errors/app-error";
 
 export const CatalogErrors = {
   codeTaken: (code: string) => new ConflictError(`Code '${code}' is already used by another product.`, [{ path: "code", message: "This code is already in use." }]),
@@ -11,6 +11,9 @@ export const CatalogErrors = {
   unknownCatalog: () => new BusinessRuleError("The selected catalog does not exist.", "UNKNOWN_CATALOG"),
   unknownCategory: () => new BusinessRuleError("The selected category does not exist.", "UNKNOWN_CATEGORY"),
   unknownUnit: () => new BusinessRuleError("The selected unit does not exist.", "UNKNOWN_UNIT"),
+  /** A default (brand / category "Other", unit "pcs") is missing or inactive: the seed creates them. */
+  defaultMissing: (what: string) => new BusinessRuleError(`Choose a ${what}: the default ${what} is missing or inactive.`, "DEFAULT_REFERENCE_MISSING", { path: what === "brand" ? "catalogId" : what === "category" ? "categoryId" : "unitId" }),
+  codeNotGenerated: () => new BusinessRuleError("Could not make a free code from the model number. Enter a code.", "CODE_NOT_GENERATED", { path: "code" }),
   unknownSupplier: () => new BusinessRuleError("The selected default supplier does not exist.", "UNKNOWN_SUPPLIER"),
   inactiveSupplier: (name: string) => new BusinessRuleError(`Supplier '${name}' is inactive.`, "INACTIVE_SUPPLIER"),
   inactiveCatalog: (name: string) => new BusinessRuleError(`Catalog '${name}' is inactive. Choose an active catalog.`, "INACTIVE_CATALOG"),
@@ -19,7 +22,6 @@ export const CatalogErrors = {
   purchaseUnitIncomplete: () =>
     new BusinessRuleError("Set both the purchase unit and its conversion factor, or neither.", "PURCHASE_UNIT_INCOMPLETE"),
   purchaseFactorInvalid: () => new BusinessRuleError("The purchase unit conversion factor must be greater than 0.", "PURCHASE_FACTOR_INVALID"),
-  purchaseCostRequired: () => new ValidationError("Purchase cost is required.", [{ path: "purchaseCost", message: "Purchase cost is required." }]),
   catalogInUse: (count: number) =>
     new BusinessRuleError(`This catalog has ${count} product${count === 1 ? "" : "s"}. Deactivate it instead of deleting.`, "CATALOG_IN_USE"),
   categoryInUse: (count: number) =>

@@ -9,6 +9,8 @@ import styles from "./dashboard.module.css";
 
 const money = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const count = new Intl.NumberFormat("en-IN");
+/** Money tiles from 1 crore up show "121.15 Cr": the exact amount doesn't fit a narrow tile (it is in the tooltip). */
+const CRORE = 1e7;
 
 /** One icon per KPI id; unknown ids fall back to a chart icon. */
 const KPI_ICONS: Record<string, IconName> = {
@@ -30,8 +32,9 @@ const KPI_ICONS: Record<string, IconName> = {
 /** Gr8r stat tile: icon + label, big tabular value, quiet caption. Warning / danger add a soft badge. */
 function Kpi({ w }: { w: KpiWidget }) {
   const n = Number(w.value);
+  const crores = w.valueType === "money" && Math.abs(n) >= CRORE;
   return (
-    <Link href={w.link} className={[styles.kpi, styles[w.tone]].join(" ")}>
+    <Link href={w.link} className={[styles.kpi, styles[w.tone]].join(" ")} title={crores ? `${w.title}: ৳ ${money.format(n)}` : undefined}>
       <span className={styles.kpiHead}>
         <Icon name={KPI_ICONS[w.id] ?? "chart"} size={14} className={styles.kpiIcon} />
         <span className={styles.kpiTitle}>{w.title}</span>
@@ -41,7 +44,14 @@ function Kpi({ w }: { w: KpiWidget }) {
         {w.valueType === "money" ? (
           <>
             <span className={styles.kpiCurrency}>৳</span>
-            {money.format(n)}
+            {crores ? (
+              <>
+                {money.format(n / CRORE)}
+                <span className={styles.kpiUnit}> Cr</span>
+              </>
+            ) : (
+              money.format(n)
+            )}
           </>
         ) : (
           count.format(n)

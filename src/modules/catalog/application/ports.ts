@@ -16,6 +16,7 @@ export interface CatalogActor extends ActorContext {
 export interface CatalogRepository {
   list(): Promise<Catalog[]>;
   findById(id: string): Promise<Catalog | null>;
+  findByNameKey(nameKey: string): Promise<Catalog | null>;
   nameExists(nameKey: string, exceptId?: string): Promise<boolean>;
   create(data: { name: string; nameKey: string; description: string | null; sortOrder: number }): Promise<Catalog>;
   update(id: string, data: Partial<{ name: string; nameKey: string; description: string | null; sortOrder: number; isActive: boolean }>): Promise<Catalog>;
@@ -26,6 +27,7 @@ export interface CatalogRepository {
 export interface CategoryRepository {
   list(): Promise<Category[]>;
   findById(id: string): Promise<Category | null>;
+  findByNameKey(nameKey: string): Promise<Category | null>;
   nameExists(nameKey: string, exceptId?: string): Promise<boolean>;
   create(data: { name: string; nameKey: string }): Promise<Category>;
   update(id: string, data: Partial<{ name: string; nameKey: string; isActive: boolean }>): Promise<Category>;
@@ -35,6 +37,7 @@ export interface CategoryRepository {
 export interface UnitRepository {
   list(): Promise<Unit[]>;
   findById(id: string): Promise<Unit | null>;
+  findByCode(code: string): Promise<Unit | null>;
   codeExists(code: string): Promise<boolean>;
   create(data: { code: string; name: string }): Promise<Unit>;
   update(id: string, data: Partial<{ name: string; isActive: boolean }>): Promise<Unit>;

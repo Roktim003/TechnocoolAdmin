@@ -1,9 +1,20 @@
 import { NotFoundError } from "@/shared/errors/app-error";
 import type { ListQuery } from "@/shared/pagination/list-query";
 import { CatalogErrors } from "../domain/errors";
-import { assertActiveRef, assertCodeUnchanged, assertPurchaseUnit, isValidCode, normalizeCode } from "../domain/rules";
+import {
+  assertActiveRef,
+  assertCodeUnchanged,
+  assertPurchaseUnit,
+  codeCandidates,
+  DEFAULT_CATALOG_NAME,
+  DEFAULT_CATEGORY_NAME,
+  DEFAULT_UNIT_CODE,
+  isValidCode,
+  nameKey,
+  normalizeCode,
+} from "../domain/rules";
 import type { Product, ProductFields } from "../domain/types";
-import type { CreateProductInput, ProductFilters, UpdateProductInput } from "./dto";
+import type { CreateProductInput, ImportProductRowInput, ProductFilters, UpdateProductInput } from "./dto";
 import type { CatalogActor, CatalogRepos, CatalogUnitOfWork } from "./ports";
 
 export const ZERO_COST = "0.00";
@@ -39,8 +50,8 @@ export function productSnapshot(p: Product) {
   };
 }
 
-/** Fields of a create request, with defaults for everything optional. */
-export function fieldsFromCreate(input: CreateProductInput, purchaseCost: string): ProductFields {
+/** Fields of a create request (code, brand, category and unit already resolved), with defaults for everything optional. */
+export function fieldsFromCreate(input: ImportProductRowInput, purchaseCost: string): ProductFields {
   return {
     name: input.name,
     catalogId: input.catalogId,
@@ -125,24 +136,49 @@ export class ProductService {
     return { code, valid, available: valid && !(await this.repos.products.codeExists(code)) };
   }
 
+  /** The default brand / category / unit for a product created without one; refused if missing or inactive. */
+  private async defaultId(kind: "brand" | "category" | "unit"): Promise<string> {
+    const ref =
+      kind === "brand"
+        ? await this.repos.catalogs.findByNameKey(nameKey(DEFAULT_CATALOG_NAME))
+        : kind === "category"
+          ? await this.repos.categories.findByNameKey(nameKey(DEFAULT_CATEGORY_NAME))
+          : await this.repos.units.findByCode(DEFAULT_UNIT_CODE);
+    if (!ref || !ref.isActive) throw CatalogErrors.defaultMissing(kind);
+    return ref.id;
+  }
+
+  /** The first free code made from the model number. */
+  private async codeFromModel(model: string): Promise<string> {
+    for (const c of codeCandidates(model)) if (!(await this.repos.products.codeExists(c))) return c;
+    throw CatalogErrors.codeNotGenerated();
+  }
+
   /**
-   * Creates a product. Roles without seeCost cannot set the purchase cost: it starts at 0 and
-   * is filled in later (by an Admin, or automatically from purchases).
+   * Creates a product. Only the item name and the model number are required: a missing code is
+   * made from the model number, a missing brand / category / unit becomes "Other" / "Other" / "pcs".
+   * Prices are optional and start at 0.00 when left out. Roles without seeCost cannot set the
+   * purchase cost: it starts at 0 and is filled in later (by an Admin, or automatically from purchases).
    */
   async create(actor: CatalogActor, input: CreateProductInput): Promise<Product> {
-    let cost = ZERO_COST;
-    if (actor.canSeeCost) {
-      if (input.purchaseCost === undefined) throw CatalogErrors.purchaseCostRequired();
-      cost = input.purchaseCost;
-    }
-    const fields = fieldsFromCreate(input, cost);
+    const cost = actor.canSeeCost ? (input.purchaseCost ?? ZERO_COST) : ZERO_COST;
+    if (input.code && (await this.repos.products.codeExists(input.code))) throw CatalogErrors.codeTaken(input.code);
+    const code = input.code ?? (await this.codeFromModel(input.model));
+    const resolved: ImportProductRowInput = {
+      ...input,
+      code,
+      catalogId: input.catalogId ?? (await this.defaultId("brand")),
+      categoryId: input.categoryId ?? (await this.defaultId("category")),
+      unitId: input.unitId ?? (await this.defaultId("unit")),
+      sellingPrice: input.sellingPrice ?? ZERO_COST,
+    };
+    const fields = fieldsFromCreate(resolved, cost);
 
-    if (await this.repos.products.codeExists(input.code)) throw CatalogErrors.codeTaken(input.code);
     if (fields.barcode && (await this.repos.products.barcodeExists(fields.barcode))) throw CatalogErrors.barcodeTaken(fields.barcode);
     await assertReferences(this.repos, fields);
 
     return this.d.uow.transaction(async (r) => {
-      const p = await r.products.create({ ...fields, code: input.code, status: input.status ?? "ACTIVE", createdById: actor.actorId });
+      const p = await r.products.create({ ...fields, code, status: input.status ?? "ACTIVE", createdById: actor.actorId });
       await r.audit.record(actor, { action: "product.create", entityType: "Product", entityId: p.id, after: productSnapshot(p) });
       return p;
     });

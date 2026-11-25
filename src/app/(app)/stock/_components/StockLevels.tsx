@@ -77,7 +77,7 @@ export function StockLevels({ caps, warehouses }: { caps: StockCaps; warehouses:
         );
       },
     })),
-    { key: "total", header: "Good total", align: "end", render: (r) => <span className={styles.num}>{formatQty(r.good)} {r.product.unitCode}</span> },
+    { key: "total", header: "Good total", align: "end", render: (r) => <span className={styles.num}>{formatQty(r.onHand)} {r.product.unitCode}</span> },
     { key: "damaged", header: "Damaged", align: "end", render: (r) => <span className={`${styles.num} ${r.damaged !== "0.000" ? styles.negative : ""}`}>{formatQty(r.damaged)}</span> },
     { key: "transit", header: "In transit", align: "end", render: (r) => <span className={styles.num}>{formatQty(r.inTransit)}</span> },
     ...(caps.seeCost
@@ -89,7 +89,7 @@ export function StockLevels({ caps, warehouses }: { caps: StockCaps; warehouses:
     {
       key: "flag",
       header: <span className="visually-hidden">Alerts</span>,
-      render: (r) => (r.product.minStockLevel && Number(r.good) < Number(r.product.minStockLevel) ? <Tag kind="red">Below minimum</Tag> : r.product.status === "DISCONTINUED" ? <Tag kind="gray">Discontinued</Tag> : null),
+      render: (r) => (r.belowMinimum ? <Tag kind="red">Below minimum</Tag> : r.product.status === "DISCONTINUED" ? <Tag kind="gray">Discontinued</Tag> : null),
     },
   ];
 

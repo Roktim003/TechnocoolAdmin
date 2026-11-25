@@ -32,12 +32,21 @@ export const ProductSourceSchema = z.preprocess(upper, z.enum(["IMPORTED", "LOCA
 
 /* ───────────────────────────── products ───────────────────────────── */
 
+/** Brand, category and unit: required ids in imports, optional on the product form / API create. */
+const catalogIdSchema = z.string({ required_error: "Choose a brand." }).uuid("Choose a brand.");
+const categoryIdSchema = z.string({ required_error: "Choose a category." }).uuid("Choose a category.");
+const unitIdSchema = z.string({ required_error: "Choose a unit." }).uuid("Choose a unit.");
+/** Optional price on the product form / API: left out, "" or null means 0.00 (both columns are NOT NULL). */
+const optionalPrice = z.preprocess((v) => (v === "" || v === null ? "0" : v), MoneySchema).optional();
+/** Required on the product form / API create, and can't be cleared once set. */
+const requiredModel = z.string({ required_error: "Model number is required." }).trim().min(1, "Model number is required.").max(100, "At most 100 characters.");
+
 const productFieldShape = {
   name: z.string().trim().min(1, "Item name is required.").max(200).openapi({ example: "LG Dual Inverter Split AC 1.5 Ton" }),
-  catalogId: z.string({ required_error: "Choose a brand." }).uuid("Choose a brand."),
+  catalogId: catalogIdSchema,
   model: text(100).openapi({ example: "S4-Q18KL3AA" }),
-  categoryId: z.string({ required_error: "Choose a category." }).uuid("Choose a category."),
-  unitId: z.string({ required_error: "Choose a unit." }).uuid("Choose a unit."),
+  categoryId: categoryIdSchema,
+  unitId: unitIdSchema,
   purchaseCost: MoneySchema.optional().openapi({ description: "Sensitive: only roles with seeCost may read or set it. Required for those roles on create." }),
   sellingPrice: MoneySchema,
   purchaseUnitId: nullableId.openapi({ description: "Unit the product is bought in (e.g. roll); requires purchaseUnitFactor" }),
@@ -60,21 +69,39 @@ const productFieldShape = {
   specifications: text(5000),
 };
 
+/**
+ * Create from the product form / API: only the item name and the model number are required.
+ * Left out (or ""), the code comes from the model number and brand, category and unit default to
+ * "Other", "Other" and "pcs" (ProductService.create).
+ */
 export const CreateProductSchema = z
-  .object({ code: ProductCodeSchema, ...productFieldShape, status: ProductStatusSchema.optional() })
+  .object({
+    ...productFieldShape,
+    code: emptyToUndefined(ProductCodeSchema).openapi({ example: "LG-S18ET", description: "Optional. Stored upper-case, immutable after creation. Left out: made from the model number (made unique with -2, -3, …)." }),
+    model: requiredModel.openapi({ example: "S4-Q18KL3AA" }),
+    catalogId: emptyToUndefined(catalogIdSchema).openapi({ description: 'Optional brand (catalog). Left out: the "Other" brand.' }),
+    categoryId: emptyToUndefined(categoryIdSchema).openapi({ description: 'Optional. Left out: the "Other" category.' }),
+    unitId: emptyToUndefined(unitIdSchema).openapi({ description: 'Optional base unit. Left out: "pcs".' }),
+    purchaseCost: optionalPrice.openapi({ type: "string", description: "Optional, BDT. Left out: 0.00 (it then updates from purchases). Sensitive: only roles with seeCost may read or set it." }),
+    sellingPrice: optionalPrice.openapi({ type: "string", description: "Optional, BDT. Left out: 0.00." }),
+    status: ProductStatusSchema.optional(),
+  })
   .strict()
   .openapi("CreateProductRequest");
+
+/** One row of a product import: the template's required columns (code, brand, category, unit) stay required. */
+export const ImportProductRowSchema = z.object({ code: ProductCodeSchema, ...productFieldShape, status: ProductStatusSchema.optional() }).strict();
 
 export const UpdateProductSchema = z
   .object({
     code: z.string().optional().openapi({ description: "May be sent but must equal the current code (422 CODE_IMMUTABLE otherwise)" }),
     name: productFieldShape.name.optional(),
     catalogId: productFieldShape.catalogId.optional(),
-    model: productFieldShape.model,
+    model: requiredModel.optional().openapi({ description: "Can't be cleared" }),
     categoryId: productFieldShape.categoryId.optional(),
     unitId: productFieldShape.unitId.optional(),
-    purchaseCost: productFieldShape.purchaseCost,
-    sellingPrice: productFieldShape.sellingPrice.optional(),
+    purchaseCost: optionalPrice.openapi({ type: "string", description: 'Sensitive: only roles with seeCost may set it. "" sets 0.00.' }),
+    sellingPrice: optionalPrice.openapi({ type: "string", description: '"" sets 0.00.' }),
     purchaseUnitId: productFieldShape.purchaseUnitId,
     purchaseUnitFactor: productFieldShape.purchaseUnitFactor,
     minStockLevel: productFieldShape.minStockLevel,
@@ -296,6 +323,7 @@ export const ImportJobSchema = z
   .openapi("ImportJob");
 
 export type CreateProductInput = z.infer<typeof CreateProductSchema>;
+export type ImportProductRowInput = z.infer<typeof ImportProductRowSchema>;
 export type UpdateProductInput = z.infer<typeof UpdateProductSchema>;
 export type CreateCatalogInput = z.infer<typeof CreateCatalogSchema>;
 export type UpdateCatalogInput = z.infer<typeof UpdateCatalogSchema>;

@@ -102,6 +102,9 @@
   line-height: 1.15;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* Last resort on very narrow tiles: cut with "…" rather than spill out of the tile. */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .kpiCurrency {
@@ -109,6 +112,13 @@
   font-size: 0.68em;
   font-weight: 500;
   color: var(--text-3);
+}
+
+/* "Cr" after a crore amount. */
+.kpiUnit {
+  font-size: 0.68em;
+  font-weight: 500;
+  color: var(--text-2);
 }
 
 .kpiFoot {

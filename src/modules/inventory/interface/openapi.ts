@@ -219,13 +219,16 @@ const StockLevelDto = registry.register(
   "StockLevel",
   z.object({
     product: z.object({ id: z.string().uuid(), code: z.string(), name: z.string(), unitCode: z.string(), minStockLevel: z.string().nullable(), trackSerial: z.boolean(), status: z.string(), catalogName: z.string(), categoryName: z.string() }),
-    warehouses: z.array(z.object({ warehouseId: z.string().uuid(), code: z.string(), good: Qty, damaged: Qty, reserved: Qty })),
-    good: Qty,
-    damaged: Qty,
+    warehouses: z.array(z.object({ warehouseId: z.string().uuid(), code: z.string(), good: Qty, damaged: Qty, reserved: Qty, available: Qty })),
+    onHand: Qty.openapi({ description: "GOOD stock on hand, all warehouses in scope" }),
     reserved: Qty,
+    available: Qty.openapi({ description: "onHand − reserved" }),
+    damaged: Qty,
     inTransit: Qty,
+    total: Qty.openapi({ description: "onHand + damaged + in transit" }),
     avgCost: Cost4.optional(),
     stockValue: Money.optional(),
+    belowMinimum: z.boolean().openapi({ description: "Available below the product's minimum stock level" }),
   }),
 );
 

@@ -99,7 +99,7 @@ export function ProductStockCard({ caps, productId, warehouses }: { caps: StockC
       {error ? <Notification kind="error">{error}</Notification> : null}
 
       <div className={styles.cards}>
-        <Card label="Good stock" value={`${formatQty(l?.good ?? "0")} ${data?.product.unitCode ?? ""}`} />
+        <Card label="Good stock" value={`${formatQty(l?.onHand ?? "0")} ${data?.product.unitCode ?? ""}`} />
         <Card label="Reserved" value={formatQty(l?.reserved ?? "0")} />
         <Card label="Damaged" value={formatQty(l?.damaged ?? "0")} />
         <Card label="In transit" value={formatQty(l?.inTransit ?? "0")} />
@@ -177,11 +177,15 @@ export function ProductStockCard({ caps, productId, warehouses }: { caps: StockC
   );
 }
 
+/** A KPI tile. Long values (crore amounts) get a smaller size; the full value is in the tooltip in case it is still cut. */
 function Card({ label, value }: { label: string; value: string }) {
+  const size = value.length > 16 ? styles.cardValueSmall : value.length > 12 ? styles.cardValueMedium : "";
   return (
     <div className={styles.card}>
       <div className={styles.cardLabel}>{label}</div>
-      <div className={styles.cardValue}>{value}</div>
+      <div className={`${styles.cardValue} ${size}`} title={value}>
+        {value}
+      </div>
     </div>
   );
 }

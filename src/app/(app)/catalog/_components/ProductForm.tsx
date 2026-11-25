@@ -92,6 +92,59 @@ const num = (n: number | string, text: ReactNode) => (
 
 type CodeState = { state: "idle" | "checking" | "available" | "taken" | "invalid" };
 
+/** A warehouse as GET /opening-stock/warehouses returns it. */
+interface OpeningWarehouse {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  openingLocked: boolean;
+}
+interface OpeningRow {
+  qty: string;
+  cost: string;
+  serials: string;
+}
+const EMPTY_OPENING: OpeningRow = { qty: "", cost: "", serials: "" };
+
+/** Serial numbers typed one per line or comma-separated (stored upper-case, as the server does). */
+const serialList = (text: string) =>
+  text
+    .split(/[\n,]+/)
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+
+/**
+ * Browser-side checks of the opening stock rows with a quantity (same rules as an OPENING entry):
+ * quantity > 0 (whole for serial-tracked products), a unit cost (or the purchase cost) with up to
+ * 4 decimals, and for serial-tracked products exactly as many distinct serials as the quantity.
+ */
+function openingProblems(rows: OpeningWarehouse[], opening: Record<string, OpeningRow>, trackSerial: boolean, purchaseCost: string): [string, string | undefined][] {
+  return rows.flatMap((w) => {
+    const row = opening[w.id] ?? EMPTY_OPENING;
+    const key = (f: keyof OpeningRow) => `opening:${w.id}:${f}`;
+    const qtyProblem = rules.qty(row.qty, { positive: true, whole: trackSerial });
+    const cost = row.cost.trim() || purchaseCost.trim();
+    const out: [string, string | undefined][] = [
+      [key("qty"), qtyProblem],
+      [key("cost"), cost ? rules.rate(cost) : "Enter the unit cost, or a purchase cost above."],
+    ];
+    if (trackSerial && !qtyProblem) {
+      const serials = serialList(row.serials);
+      const qty = Number(row.qty);
+      out.push([
+        key("serials"),
+        serials.length !== qty
+          ? `Enter ${qty} serial number${qty === 1 ? "" : "s"} (${serials.length} entered).`
+          : new Set(serials).size !== serials.length
+            ? "A serial number is entered twice."
+            : undefined,
+      ]);
+    }
+    return out;
+  });
+}
+
 interface Props {
   caps: CatalogCaps;
   product: ProductDto | null;
@@ -118,6 +171,26 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
   const [newCategoryAttempt, setNewCategoryAttempt] = useState(false);
   // One key per form session: a double-submit or retry can't create two products.
   const idempotencyKey = useMemo(() => `product-${crypto.randomUUID()}`, []);
+
+  // Opening stock posted with a new product (inventory FULL + seeCost): one OPENING entry per warehouse.
+  const offerOpening = !editing && caps.canAddOpeningStock;
+  const [openingWarehouses, setOpeningWarehouses] = useState<OpeningWarehouse[] | null>(null);
+  const [opening, setOpening] = useState<Record<string, OpeningRow>>({});
+  const openingKeys = useMemo(() => new Map<string, string>(), []);
+  useEffect(() => {
+    if (!offerOpening) return;
+    api<{ data: OpeningWarehouse[] }>("/opening-stock/warehouses")
+      .then((r) => setOpeningWarehouses(r.data.filter((w) => w.isActive)))
+      .catch(() => setOpeningWarehouses([]));
+  }, [offerOpening]);
+  const setOpeningField = (warehouseId: string, field: keyof OpeningRow) => (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setOpening((prev) => ({ ...prev, [warehouseId]: { ...EMPTY_OPENING, ...prev[warehouseId], [field]: value } }));
+    const key = `opening:${warehouseId}:${field}`;
+    if (errors[key]) setErrors((prev) => ({ ...prev, [key]: "" }));
+  };
+  /** Warehouses with a quantity entered. */
+  const openingRows = (openingWarehouses ?? []).filter((w) => !w.openingLocked && opening[w.id]?.qty.trim());
 
   // Suppliers (purchasing). Roles that can't list them keep the free-text field.
   const [suppliers, setSuppliers] = useState<{ id: string; code: string; name: string; isActive: boolean }[] | null>(null);
@@ -170,14 +243,14 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
       "code",
       editing
         ? undefined
-        : (rules.required(codeValue, "a code") ?? (!CODE_PATTERN.test(codeValue) ? CODE_MESSAGE : code.state === "taken" ? "This code is already used by another product. Enter a different one." : undefined)),
+        : // Optional: left empty, the server makes it from the model number.
+          codeValue && (!CODE_PATTERN.test(codeValue) ? CODE_MESSAGE : code.state === "taken" ? "This code is already used by another product. Enter a different one." : undefined),
     ],
-    ["catalogId", rules.chosen(v.catalogId, "a brand")],
-    ["model", rules.maxLength(v.model, 100)],
-    ["categoryId", rules.chosen(v.categoryId, "a category")],
-    ["unitId", rules.chosen(v.unitId, "a unit")],
-    ["purchaseCost", caps.seeCost ? (rules.required(v.purchaseCost, "the purchase cost") ?? rules.money(v.purchaseCost)) : undefined],
-    ["sellingPrice", rules.required(v.sellingPrice, "the selling price") ?? rules.money(v.sellingPrice)],
+    // Brand, category and unit are optional: left empty they become "Other", "Other" and "pcs".
+    ["model", rules.required(v.model, "the model number") ?? rules.maxLength(v.model, 100)],
+    // Prices are optional: left empty they are saved as 0.00.
+    ["purchaseCost", caps.seeCost ? rules.money(v.purchaseCost) : undefined],
+    ["sellingPrice", rules.money(v.sellingPrice)],
     ["minStockLevel", rules.qty(v.minStockLevel)],
     ["barcode", rules.maxLength(v.barcode, 64) ?? (v.barcode.trim() && !BARCODE.test(v.barcode.trim()) ? "Use letters, digits and symbols only, without spaces." : undefined)],
     ["warrantyMonths", rules.integer(v.warrantyMonths, { min: 0, max: 600 })],
@@ -195,8 +268,12 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
       v.purchaseUnitId && factorBlank ? "Enter how many base units are in one purchase unit." : (rules.qty(v.purchaseUnitFactor, { positive: true })),
     ],
     ["specifications", rules.maxLength(v.specifications, 5000)],
+    ...openingProblems(openingRows, opening, trackSerial, v.purchaseCost),
   );
   const shownErrors: Record<string, string | undefined> = { ...errors, ...(attempt ? problems : {}) };
+  const OPENING_FIELD = { qty: "quantity", cost: "unit cost", serials: "serial numbers" } as const;
+  const problemLabels: Record<string, string> = { ...LABELS };
+  for (const w of openingWarehouses ?? []) for (const [f, label] of Object.entries(OPENING_FIELD)) problemLabels[`opening:${w.id}:${f}`] = `Opening stock, ${w.name}: ${label}`;
 
   // Inline "+ New category": name required, at most 60 characters (CreateCategorySchema).
   const newCategoryProblem = newCategory === null ? undefined : (rules.required(newCategory, "a name") ?? rules.maxLength(newCategory, 60));
@@ -244,17 +321,43 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
         return;
       }
       const created = (await api<{ data: ProductDto }>("/products", { method: "POST", body: { ...body, code: v.code.trim() }, headers: { "Idempotency-Key": idempotencyKey } })).data;
+      // The product exists from here on: problems with photos or opening stock are shown on its page.
+      const after = new URLSearchParams({ saved: "1" });
       if (pending.length) {
         const fd = new FormData();
         pending.forEach((f) => fd.append("file", f, f.name));
         try {
           await upload(`/products/${created.id}/photos`, fd);
         } catch (err) {
-          router.push(`/catalog/${created.id}?saved=1&photoError=${encodeURIComponent(errorMessage(err))}`);
-          return;
+          after.set("photoError", errorMessage(err));
         }
       }
-      router.push(`/catalog/${created.id}?saved=1`);
+      const posted: string[] = [];
+      for (const w of openingRows) {
+        const row = opening[w.id] ?? EMPTY_OPENING;
+        if (!openingKeys.has(w.id)) openingKeys.set(w.id, `opening-${crypto.randomUUID()}`);
+        try {
+          const entry = (
+            await api<{ data: { number: string | null } }>("/stock-entries", {
+              method: "POST",
+              headers: { "Idempotency-Key": openingKeys.get(w.id)! },
+              body: {
+                action: "post",
+                type: "OPENING",
+                warehouseId: w.id,
+                notes: "Opening stock entered with the new product.",
+                lines: [{ productId: created.id, qty: row.qty.trim(), unitPrice: (row.cost.trim() || v.purchaseCost).trim(), ...(trackSerial ? { serials: serialList(row.serials) } : {}) }],
+              },
+            })
+          ).data;
+          posted.push(entry.number ?? w.code);
+        } catch (err) {
+          after.set("stockError", `${w.name}: ${errorMessage(err)}`);
+          break;
+        }
+      }
+      if (posted.length) after.set("stockPosted", posted.join(", "));
+      router.push(`/catalog/${created.id}?${after.toString()}`);
     } catch (err) {
       const fields = err instanceof ApiError ? err.fieldErrors() : {};
       setErrors(fields);
@@ -273,7 +376,7 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
     ) : code.state === "checking" ? (
       "Checking…"
     ) : (
-      "Must be unique. Can’t be changed after saving."
+      "Optional: left empty, the model number is used. Must be unique. Can’t be changed after saving."
     );
 
   return (
@@ -283,7 +386,7 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
           {formError}
         </Notification>
       ) : null}
-      {attempt ? <FormProblems problems={problems} labels={LABELS} /> : null}
+      {attempt ? <FormProblems problems={problems} labels={problemLabels} /> : null}
 
       <section className={styles.section} aria-labelledby="sec-basic">
         <h2 id="sec-basic" className={styles.sectionTitle}>
@@ -293,7 +396,7 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
         <div className={styles.grid}>
           <TextField label={num(1, "Item name *")} value={v.name} onChange={set("name")} error={shownErrors.name} fieldClassName={styles.full} placeholder="e.g. LG Dual Inverter Split AC 1.5 Ton" />
           <TextField
-            label={num(2, "Code / SKU *")}
+            label={num(2, "Code / SKU")}
             value={v.code}
             onChange={set("code")}
             error={shownErrors.code || (!editing && code.state === "invalid" && v.code ? CODE_MESSAGE : undefined)}
@@ -306,7 +409,7 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
             placeholder="LG-S18ET"
           />
           <div />
-          <SelectField searchable label={num("3a", "Brand (catalog) *")} value={v.catalogId} onChange={set("catalogId")} error={shownErrors.catalogId}>
+          <SelectField searchable label={num("3a", "Brand (catalog)")} value={v.catalogId} onChange={set("catalogId")} error={shownErrors.catalogId} helper={editing ? undefined : "Left empty: Other."}>
             <option value="">Choose a brand</option>
             {usable(catalogs, product?.catalog.id).map((c) => (
               <option key={c.id} value={c.id}>
@@ -315,9 +418,9 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
               </option>
             ))}
           </SelectField>
-          <TextField label={num("3b", "Model number")} value={v.model} onChange={set("model")} error={shownErrors.model} mono placeholder="S4-Q18KL3AA" />
+          <TextField label={num("3b", "Model number *")} value={v.model} onChange={set("model")} error={shownErrors.model} mono placeholder="S4-Q18KL3AA" />
           <div>
-            <SelectField searchable label={num(4, "Category *")} value={v.categoryId} onChange={set("categoryId")} error={shownErrors.categoryId}>
+            <SelectField searchable label={num(4, "Category")} value={v.categoryId} onChange={set("categoryId")} error={shownErrors.categoryId} helper={editing ? undefined : "Left empty: Other."}>
               <option value="">Choose a category</option>
               {usable(categories, product?.category.id).map((c) => (
                 <option key={c.id} value={c.id}>
@@ -360,7 +463,7 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
               )
             ) : null}
           </div>
-          <SelectField searchable label={num(5, "Unit of measure *")} value={v.unitId} onChange={set("unitId")} error={shownErrors.unitId} helper="Stock is always counted in this unit.">
+          <SelectField searchable label={num(5, "Unit of measure")} value={v.unitId} onChange={set("unitId")} error={shownErrors.unitId} helper={editing ? "Stock is always counted in this unit." : "Stock is always counted in this unit. Left empty: pcs."}>
             <option value="">Choose a unit</option>
             {units
               .filter((u) => u.isActive || u.id === product?.unit.id)
@@ -391,12 +494,12 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
           </span>
           Price
         </h2>
-        <p className={styles.sectionHelp}>Amounts in BDT.</p>
+        <p className={styles.sectionHelp}>Amounts in BDT. Optional: left empty, a price is saved as 0.00.</p>
         <div className={styles.grid}>
           {caps.seeCost ? (
-            <TextField label="Purchase cost (BDT) *" kind="money" value={v.purchaseCost} onChange={set("purchaseCost")} error={shownErrors.purchaseCost} placeholder="0.00" />
+            <TextField label="Purchase cost (BDT)" kind="money" value={v.purchaseCost} onChange={set("purchaseCost")} error={shownErrors.purchaseCost} placeholder="0.00" />
           ) : null}
-          <TextField label="Selling price (BDT) *" kind="money" value={v.sellingPrice} onChange={set("sellingPrice")} error={shownErrors.sellingPrice} placeholder="0.00" />
+          <TextField label="Selling price (BDT)" kind="money" value={v.sellingPrice} onChange={set("sellingPrice")} error={shownErrors.sellingPrice} placeholder="0.00" />
         </div>
         <p className={styles.note}>Cost can later update automatically from purchases (average cost).</p>
       </section>
@@ -478,6 +581,58 @@ export function ProductForm({ caps, product, initialCatalogId }: Props) {
           <TextAreaField label="Specifications / notes" value={v.specifications} onChange={set("specifications")} error={shownErrors.specifications} fieldClassName={styles.full} rows={5} />
         </div>
       </section>
+
+      {offerOpening ? (
+        <section className={styles.section} aria-labelledby="sec-opening">
+          <h2 id="sec-opening" className={styles.sectionTitle}>
+            Opening stock (optional)
+          </h2>
+          <p className={styles.sectionHelp}>
+            Stock you already have of this product. Saving posts an opening stock entry for each warehouse with a quantity. Leave empty to add stock later (Stock in / out). Unit cost
+            left empty: the purchase cost.
+          </p>
+          {openingWarehouses === null ? (
+            <p className={styles.sectionHelp}>Loading warehouses…</p>
+          ) : openingWarehouses.length === 0 ? (
+            <p className={styles.sectionHelp}>No warehouses available.</p>
+          ) : (
+            <div className={styles.grid}>
+              {openingWarehouses.map((w) => {
+                const row = opening[w.id] ?? EMPTY_OPENING;
+                const err = (f: keyof OpeningRow) => shownErrors[`opening:${w.id}:${f}`];
+                return w.openingLocked ? (
+                  <p key={w.id} className={`${styles.sectionHelp} ${styles.full}`}>
+                    <strong>{w.name}:</strong> opening stock is locked. Receive stock with a GRN (Stock in / out) instead.
+                  </p>
+                ) : (
+                  <div key={w.id} className={`${styles.grid} ${styles.full}`}>
+                    <TextField
+                      label={`${w.name}: quantity`}
+                      kind="qty"
+                      value={row.qty}
+                      onChange={setOpeningField(w.id, "qty")}
+                      error={err("qty")}
+                      helper={units.find((u) => u.id === v.unitId)?.code ?? "pcs"}
+                    />
+                    <TextField label={`${w.name}: unit cost (BDT)`} kind="rate" value={row.cost} onChange={setOpeningField(w.id, "cost")} error={err("cost")} placeholder={v.purchaseCost || "0.00"} />
+                    {trackSerial && row.qty.trim() ? (
+                      <TextAreaField
+                        label={`${w.name}: serial numbers *`}
+                        value={row.serials}
+                        onChange={setOpeningField(w.id, "serials")}
+                        error={err("serials")}
+                        fieldClassName={styles.full}
+                        rows={3}
+                        helper="One per line (or separated by commas): exactly as many as the quantity."
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       <div className={styles.footer}>
         <Link href={editing ? `/catalog/${product.id}` : "/catalog"} className={styles.secondaryLink}>

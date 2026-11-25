@@ -580,11 +580,12 @@ a.mono:hover {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: var(--s-3);
 }
 
 .card {
+  min-width: 0;
   padding: var(--s-3) var(--s-4);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -604,6 +605,18 @@ a.mono:hover {
   letter-spacing: -0.02em;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
+  /* "৳ 1,20,00,000.00" stays on one line; anything still too wide is cut with "…" (full value in the tooltip). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardValueMedium {
+  font-size: 18px;
+}
+
+.cardValueSmall {
+  font-size: 15px;
 }
 
 @media (max-width: 960px) {

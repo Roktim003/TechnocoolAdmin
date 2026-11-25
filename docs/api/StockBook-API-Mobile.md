@@ -3000,20 +3000,20 @@ Content-Type: application/json
 | **Who can call** | Requires `catalog` ≥ CREATE |
 | **Idempotency-Key** | Optional (header) — recommended |
 
-Code is stored upper-case and can't be changed later. Roles without seeCost can't set purchaseCost (it starts at 0). `purchaseCost` is removed from the response unless the role has `seeCost`.
+Only `name` and `model` are required. Code is stored upper-case and can't be changed later. Roles without seeCost can't set purchaseCost (it starts at 0). `purchaseCost` is removed from the response unless the role has `seeCost`.
 
 **Request body (application/json)**
 
 | Field | Type | Req. | Description |
 |---|---|---|---|
-| `code` | string | Yes | Stored upper-case. Immutable after creation. |
+| `code` | string |  | Optional. Stored upper-case, immutable after creation. Left out: made from the model number (`S4 Q18/KL3AA` → `S4-Q18-KL3AA`, then `-2`, `-3`… if taken). |
 | `name` | string | Yes | 1–200 chars |
-| `catalogId` | string (uuid) | Yes |  |
-| `model` | string or null |  | max 100 chars |
-| `categoryId` | string (uuid) | Yes |  |
-| `unitId` | string (uuid) | Yes |  |
-| `purchaseCost` | string |  | Sensitive: only roles with seeCost may read or set it. Required for those roles on create. |
-| `sellingPrice` | string | Yes | BDT, decimal string with up to 2 decimals |
+| `catalogId` | string (uuid) |  | Optional brand. Left out: the "Other" brand. |
+| `model` | string | Yes | 1–100 chars. Can't be cleared later (PATCH with an empty model → 400). |
+| `categoryId` | string (uuid) |  | Optional. Left out: the "Other" category. |
+| `unitId` | string (uuid) |  | Optional base unit. Left out: `pcs`. |
+| `purchaseCost` | string |  | Optional, BDT. Left out or empty: 0.00 (it then updates from purchases). Sensitive: only roles with seeCost may read or set it. |
+| `sellingPrice` | string |  | Optional, BDT, up to 2 decimals. Left out or empty: 0.00. |
 | `purchaseUnitId` | string (uuid) or null |  | Unit the product is bought in (e.g. roll); requires purchaseUnitFactor |
 | `purchaseUnitFactor` | string or number or null |  | Base units per purchase unit (e.g. 50 when 1 roll = 50 m) |
 | `minStockLevel` | string or number or null |  |  |

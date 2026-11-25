@@ -33,6 +33,10 @@ function catalogRepository(db: Db): CatalogRepository {
       const c = await db.catalog.findUnique({ where: { id }, include: withCount });
       return c ? map(c) : null;
     },
+    async findByNameKey(nameKey) {
+      const c = await db.catalog.findUnique({ where: { nameKey }, include: withCount });
+      return c ? map(c) : null;
+    },
     async nameExists(nameKey, exceptId) {
       return (await db.catalog.count({ where: { nameKey, ...(exceptId ? { id: { not: exceptId } } : {}) } })) > 0;
     },
@@ -62,6 +66,10 @@ function categoryRepository(db: Db): CategoryRepository {
       const c = await db.category.findUnique({ where: { id }, include: withCount });
       return c ? map(c) : null;
     },
+    async findByNameKey(nameKey) {
+      const c = await db.category.findUnique({ where: { nameKey }, include: withCount });
+      return c ? map(c) : null;
+    },
     async nameExists(nameKey, exceptId) {
       return (await db.category.count({ where: { nameKey, ...(exceptId ? { id: { not: exceptId } } : {}) } })) > 0;
     },
@@ -81,6 +89,7 @@ function unitRepository(db: Db): UnitRepository {
   return {
     list: () => db.unit.findMany({ orderBy: { code: "asc" } }),
     findById: (id) => db.unit.findUnique({ where: { id } }),
+    findByCode: (code) => db.unit.findUnique({ where: { code } }),
     async codeExists(code) {
       return (await db.unit.count({ where: { code } })) > 0;
     },
